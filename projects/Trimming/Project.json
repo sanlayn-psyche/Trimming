@@ -11,8 +11,11 @@
         "./Tool/",
         "./PDTrimming/"
     ],
-    "third_party_deps": [],
-    "internal_deps": [],
+    "dependencies": [
+        "${OCCT}",
+        "Eigen",
+        "stb"
+    ],
     "executable": {
         "compile": true,
         "entry_file": "main.cpp"

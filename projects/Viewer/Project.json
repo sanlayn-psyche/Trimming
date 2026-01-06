@@ -5,8 +5,7 @@
         "./QtUI"
     ],
     "include_dirs": [],
-    "third_party_deps": [],
-    "internal_deps": [
+    "dependencies": [
         "../Trimming"
     ],
     "executable": {
