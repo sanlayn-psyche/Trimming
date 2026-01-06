@@ -1,0 +1,66 @@
+{
+  "Model": [
+    "D:/Project/NurbsViwer/Resource/model/",
+    "buick_tvcg"
+  ],
+  "Render": {
+    "OIT": {
+      "Enable": [
+        0
+      ],
+      "Layer": [
+        16
+      ]
+    },
+    "SMCount": [
+      84
+    ],
+    "WindowSize": [
+      1920,
+      1080
+    ],
+    "MeshletNum": [
+      2488576
+    ],
+    "method": [
+      "fp16denserecover"
+    ]
+  },
+  "Test": {
+    "BenchMark": {
+      "Enable": [
+        0
+      ],
+      "RotSamples": [
+        64
+      ],
+      "RotFreq": [
+        10
+      ]
+    },
+    "DuplicateNum": [
+      1
+    ],
+    "DuplicateRowCol": [
+      4,
+      5
+    ],
+    "Rasterizer": {
+      "Hard": 1,
+      "Soft": 1
+    }
+  },
+  "Trimming": {
+    "Enable": 1,
+    "Preproccess": {
+      "DebugStartFrom": 1,
+      "SkipExisting": 1,
+      "ThreadWaitTime": 1000,
+      "WorkerThreadCnt": 8
+    },
+    "GenerateMode": 0,
+    "SearchMethod": "KD",
+    "EvalMethod": "BIN_EVAL",
+    "PatchPerFolder": 1000
+  }
+}

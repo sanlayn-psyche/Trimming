@@ -1,0 +1,7 @@
+{
+    "name": "Trimming",
+    "projects": [
+        "projects/Trimming",
+        "projects/Viewer"
+    ]
+}

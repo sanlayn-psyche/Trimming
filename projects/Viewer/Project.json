@@ -1,0 +1,22 @@
+{
+    "name": "TrimmingViewer",
+    "version": "1.0.0",
+    "source_dirs": [
+        "./QtUI"
+    ],
+    "include_dirs": [],
+    "third_party_deps": [],
+    "internal_deps": [
+        "../Trimming"
+    ],
+    "executable": {
+        "compile": true,
+        "entry_file": "main.cpp"
+    },
+    "library": {
+        "compile": false,
+        "static": true,
+        "export_headers": [],
+        "install_dir": "install/"
+    }
+}

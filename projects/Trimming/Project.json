@@ -1,0 +1,24 @@
+{
+    "name": "Trimming",
+    "version": "1.0.0",
+    "source_dirs": [
+        "./Geometry",
+        "./Tool",
+        "./PDTrimming"
+    ],
+    "include_dirs": [],
+    "third_party_deps": [],
+    "internal_deps": [],
+    "executable": {
+        "compile": true,
+        "entry_file": "main.cpp"
+    },
+    "library": {
+        "compile": true,
+        "static": true,
+        "export_headers": [
+            "include/api.h"
+        ],
+        "install_dir": "install/"
+    }
+}
