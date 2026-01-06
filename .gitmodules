@@ -1,0 +1,3 @@
+[submodule "CMakeTool"]
+	path = CMakeTool
+	url = https://github.com/sanlayn-psyche/CMakeTool.git

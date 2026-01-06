@@ -4,13 +4,8 @@
 #include <atomic>
 #include <thread>
 
-#ifdef _DEBUG
-#include "vld.h"
-#endif
-
 int main(int argc, char** argv)
 {
-
 	TrimManager* tm_ptr{nullptr};
 	tm_ptr = new TrimManager();
 	tm_ptr->run();

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TrimmingCurveViewer.h"
+#include "TrimmingCurveViewer2.h"
 #include "Patch.h"
 #include "NurbsCurve.h"
 #include "TrimLoop.h"

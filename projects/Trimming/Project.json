@@ -6,7 +6,11 @@
         "./Tool",
         "./PDTrimming"
     ],
-    "include_dirs": [],
+    "include_dirs": [
+        "./Geometry/",
+        "./Tool/",
+        "./PDTrimming/"
+    ],
     "third_party_deps": [],
     "internal_deps": [],
     "executable": {
