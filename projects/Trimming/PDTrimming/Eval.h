@@ -14,6 +14,7 @@ public:
 
 	virtual int get_side(int dir, float key, Point& p1, Point& p2) const = 0;
 	virtual double get_dist(const float* detail, double u, double v, Point &p1, Point &p2, int pos) const = 0;
+	virtual int get_seachtime(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const = 0;
 	virtual void set_eval(SearchDelegateLeaf &leaf) = 0;
 
 	std::vector<BiMonoSubCurve*> m_curves;
@@ -31,10 +32,13 @@ public:
 	int get_side(int dir, float key, Point& p1, Point& p2) const override;
 	void act_preposess(NurbsFace& surf) override;
 	double get_dist(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const override;
+	int get_seachtime(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const override;
 	void set_eval(SearchDelegateLeaf& leaf) override;
-private:
+
 	vector<int> m_fineSampleDir;
 	vector<int> m_sampleRate;
+private:
+	
 	vector<vector<double>> m_fineSample;
 	int act_find_sample_rate(NurbsFace& surf, BiMonoSubCurve* msc, double s, double t);
 	void act_sampling(NurbsFace& surf, BiMonoSubCurve* msc, std::vector<BiMonoSubCurve*>& newsubcurve, std::vector<int>& sampleRate);
@@ -56,6 +60,7 @@ public:
 	void act_write(vector<float>& corse, vector<float>& fine) const override;
 	void act_preposess(NurbsFace& surf) override;
 	double get_dist(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const override;
+	int get_seachtime(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const override;
 	static float act_bin_search(int order, float* uv, float* detail);
 	static void get_nurbsEval(float u, int order, vector<float>& cvs);
 	void set_eval(SearchDelegateLeaf& leaf) override;
@@ -70,6 +75,7 @@ public:
 	void act_write(vector<float>& corse, vector<float>& fine) const override;
 	void act_preposess(NurbsFace& surf) override;
 	double get_dist(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const override;
+	int get_seachtime(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const override;
 	static float get_dist(float* uv, float*& fine);
 	static float get_dist(float* uv, float*& corse, float*& fine, bool move);
 	void set_eval(SearchDelegateLeaf& leaf) override;

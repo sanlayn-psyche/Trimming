@@ -278,6 +278,129 @@ double EvalDelegate_bineval::get_dist(const float* detail, double u, double v, P
 	return dist;
 }
 
+int EvalDelegate_bineval::get_seachtime(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const
+{
+	auto get_power = [](double x, int y)
+		{
+			double ret = 1.f;
+			for (int i = 0; i < y; i++)
+			{
+				ret = ret * x;
+			}
+			return ret;
+		};
+	int searchtime = 0;
+
+	detail += pos;
+	int order = detail[0];
+	int bezier_cnt = detail[1];
+	float dir = detail[2];
+	detail += 3;
+
+	double dist = 1.0;
+	int length = 4 + order * 3;
+
+	int imin = 0, imax = bezier_cnt;
+	int icenter = (imin + imax) / 2;
+	//__debug_break(u < 1.1303598880767822 && u > 1.12 && v < 1.0899274349212646 && v > 0.92);
+	while (imax > imin)
+	{
+		searchtime++;
+		//p1[0] = detail[length * icenter];
+		//p2[0] = detail[1 + length * icenter];
+		//p1[1] = detail[2 + length * icenter];
+		//p2[1] = detail[3 + length * icenter];
+		int offset = length * icenter + 4;
+		p1[0] = detail[offset];
+		p1[1] = detail[offset + 1];
+		p2[0] = detail[offset + 3 * (order - 1)];
+		p2[1] = detail[offset + 3 * (order - 1) + 1];
+		if (std::min(p1[0], p2[0]) <= u && std::max(p1[0], p2[0]) >= u && std::min(p1[1], p2[1]) <= v && std::max(p1[1], p2[1]) >= v)
+		{
+			bool diru = p2[0] > p1[0];
+			bool dirv = p2[1] > p1[1];
+
+			if (order > 2)
+			{
+				float t1 = 0.f, t2 = 1.0f;
+				for (int i = 0; i < 30; i++)
+				{
+					searchtime++;
+					float t = (t1 + t2) * 0.5f;
+					Point3D point{ 0.f, 0.f, 0.f };
+
+					for (int j = 0; j < order; j++)
+					{
+						Point3D cv{ detail[offset + 3 * j], detail[offset + 3 * j + 1], detail[offset + 3 * j + 2] };
+						cv[0] *= cv[2];
+						cv[1] *= cv[2];
+						double bernstein = binomial_comb[(order - 2) * 16 + j] * get_power(t, j) * get_power(1.f - t, order - 1 - j);
+						point += bernstein * cv;
+					}
+					point[0] /= point[2];
+					point[1] /= point[2];
+					if ((u >= point[0]) == diru)
+					{
+						t1 = t;
+						p1[0] = point[0];
+						p1[1] = point[1];
+					}
+					else
+					{
+						t2 = t;
+						p2[0] = point[0];
+						p2[1] = point[1];
+					}
+					if (((u >= point[0]) == (v >= point[1])) != (diru == dirv))
+					{
+						break;
+					}
+				}
+			}
+			break;
+		}
+
+		if (dir > 0)
+		{
+			if (u >= std::min(p1[0], p2[0]) && v <= std::max(p1[1], p2[1]))
+			{
+				break;
+			}
+
+			if (u <= std::max(p1[0], p2[0]) && v >= std::min(p1[1], p2[1]))
+			{
+
+				dist = -1.0;
+				break;
+			}
+		}
+		else
+		{
+			if (u <= std::max(p1[0], p2[0]) && v <= std::max(p1[1], p2[1]))
+			{
+				dist = -1.0;
+				break;
+			}
+
+			if (u >= std::min(p1[0], p2[0]) && v >= std::min(p1[1], p2[1]))
+			{
+				break;
+			}
+		}
+
+		if (v < std::min(p1[1], p2[1]))
+		{
+			imax = icenter;
+		}
+		else
+		{
+			imin = icenter + 1;
+		}
+		icenter = (imin + imax) / 2;
+	}
+	return searchtime;
+}
+
 
 float EvalDelegate_bineval::act_bin_search(int order, float* uv, float* detail)
 {
@@ -519,6 +642,11 @@ double EvalDelegate_implicit::get_dist(const float* detail, double u, double v, 
 	return 0.0;
 }
 
+int EvalDelegate_implicit::get_seachtime(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const
+{
+	return 0;
+}
+
 
 float EvalDelegate_implicit::get_dist(float* uv, float*& corse, float*& fine, bool move)
 {
@@ -733,7 +861,18 @@ void EvalDelegate_ls::act_preposess(NurbsFace& surf)
 		vector<BiMonoSubCurve*> newsubcurve;
 		vector<int> sampleRate;
 		bool ifinc = ((*curve_ptr)->m_direct[m_dir] == 1);
-		act_sampling(surf, *curve_ptr, newsubcurve, sampleRate);
+
+		try
+		{
+			act_sampling(surf, *curve_ptr, newsubcurve, sampleRate);
+		}
+		catch (const lf_exception_subcurves&err)
+		{
+			subcurve.insert(subcurve.end(), newsubcurve.begin(), newsubcurve.end());
+			m_curves.assign(subcurve.begin(), subcurve.end());
+			throw err;
+		}
+
 		if (!ifinc)
 		{
 			std::reverse(newsubcurve.begin(), newsubcurve.end());
@@ -816,6 +955,73 @@ double EvalDelegate_ls::get_dist(const float* detail, double u, double v, Point&
 	return coverValue;
 }
 
+int EvalDelegate_ls::get_seachtime(const float* detail, double u, double v, Point& p1, Point& p2, int pos) const
+{
+	int searchtime = 0;
+	if (abs(pos) > 1 && u <= std::max(p1[0], p2[0]) && u >= std::min(p1[0], p2[0]) && v <= std::max(p1[1], p2[1]) && v >= std::min(p1[1], p2[1]))
+	{
+		detail = detail + abs(pos) - 2;
+		int index = fabs(p2[1] - p1[1]) > fabs(p2[0] - p1[0]) ? 1 : 0;
+		float h = 1.0f;
+		float delta = 0.f;
+
+		if (index == 0)
+		{
+			h = (p2[0] - p1[0]);
+			delta = (u - p1[0]) / h;
+		}
+		else
+		{
+			h = (p2[1] - p1[1]);
+			delta = (v - p1[1]) / h;
+		}
+
+		if (delta < 1.0f && delta > 0.0f)
+		{
+			float sampleRate = detail[0];
+			int area = int(sampleRate * delta);
+			int asp = int(sampleRate);
+			h /= sampleRate;
+			if (area > 0)
+			{
+				if (index == 1)
+				{
+					p1[0] = detail[area];
+					p1[1] += float(area) * h;
+				}
+				else
+				{
+					p1[1] = detail[area];
+					p1[0] += float(area) * h;
+				}
+			}
+
+			if (area < asp - 1)
+			{
+				if (index == 1)
+				{
+					p2[0] = detail[area + 1];
+					p2[1] = p1[1] + h;
+				}
+				else
+				{
+					p2[1] = detail[area + 1];
+					p2[0] = p1[0] + h;
+				}
+			}
+		}
+	}
+
+	p2 -= p1;
+	float coverValue = (u - p1[0]) * p2[1] - (v - p1[1]) * p2[0];
+	if (pos < 0)
+	{
+		coverValue = -coverValue;
+	}
+	p2[1] = 1.0;
+	return coverValue;
+}
+
 
 int EvalDelegate_ls::act_find_sample_rate(NurbsFace& surf, BiMonoSubCurve* msc, double s, double t)
 {
@@ -825,32 +1031,53 @@ int EvalDelegate_ls::act_find_sample_rate(NurbsFace& surf, BiMonoSubCurve* msc, 
 	int dir = fabs(ps[1][1] - ps[0][1]) > fabs(ps[1][0] - ps[0][0]) ? 1 : 0;
 	double l = ps[0][dir], r = ps[1][dir];
 
+	auto if_not_end = [](int spr, ParallelBox<double>& pdb)
+		{
+			return (spr < 10 || pdb.get_area() > FLOAT_ZERO_GEOMETRY_COMPARE * 10.0) && spr < 100;
+		};
+
 	while (excess_error)
 	{
 		excess_error = false;
 		spr++;
-		double h = (r - l) / double(spr);
-		double cutpos = l;
-		double paras[2]{ s, 0.0 };
-		for (size_t i = 0; i < spr; i++)
+		if (spr == 1)
 		{
-			cutpos += h;
-			Point inter{ cutpos };
-			double cut = msc->get_aaIntersects(dir, inter, s, t);
-			paras[1] = cut;
-			auto pdb = msc->get_paraBox(paras[0], paras[1]);
-
+			auto pdb = msc->get_paraBox(s, t);
 			if (surf.get_sizeOnSurf(pdb) > m_accuracy)
 			{
-				if ((spr < 20 || pdb.get_area() > FLOAT_ZERO_GEOMETRY_COMPARE) && spr < 200)
+				if (if_not_end(spr, pdb))
 				{
 					excess_error = true;
-					break;
 				}
-
+		
 			}
-			paras[0] = paras[1];
 		}
+		else
+		{
+			double h = (r - l) / double(spr);
+			double cutpos = l;
+			double paras[2]{ s, 0.0 };
+			for (size_t i = 0; i < spr; i++)
+			{
+				cutpos += h;
+				Point inter{ cutpos };
+				double cut = msc->get_aaIntersects(dir, inter, s, t);
+				paras[1] = cut;
+				auto pdb = msc->get_paraBox(paras[0], paras[1]);
+
+				if (surf.get_sizeOnSurf(pdb) > m_accuracy)
+				{
+					if (if_not_end(spr, pdb))
+					{
+						excess_error = true;
+						break;
+					}
+
+				}
+				paras[0] = paras[1];
+			}
+		}
+		
 	}
 	return spr;
 }

@@ -19,14 +19,7 @@ protected:
 
 	virtual const void act_generate_info() const
 	{
-		if (m_patchid == -1)
-		{
-			m_outputs = "Error# " + std::to_string(m_errorCode) + ", Unknown patch. ";
-		}
-		else
-		{
-			m_outputs = "Error# " + std::to_string(m_errorCode) + ", Patch# " + std::to_string(m_patchid) + ". ";
-		}
+		m_outputs = "Error# " + std::to_string(m_errorCode) + ". ";
 	}
 
 

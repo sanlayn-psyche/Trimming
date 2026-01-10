@@ -1,0 +1,21 @@
+{
+    "name": "Test",
+    "cpp_standard": 20,
+    "version": "1.0.0",
+    "source_dirs": [
+    ],
+    "include_dirs": [],
+    "dependencies": [
+        "../Trimming"
+    ],
+    "executable": {
+        "compile": true,
+        "entry_file": "main.cpp"
+    },
+    "library": {
+        "compile": false,
+        "static": true,
+        "export_headers": [],
+        "install_dir": "install/"
+    }
+}

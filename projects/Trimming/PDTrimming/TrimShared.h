@@ -14,6 +14,8 @@ using std::string;
 using std::vector;
 #include <algorithm>
 
+class Patch;
+class TrimManager;
 class SlabSet;
 class CurveSet;
 class CurveSet_NODE;
@@ -44,7 +46,7 @@ CREATE_ENUM(NodeType, BSP, KD, GRID, LEAF, INVALID, CULLING);
 CREATE_ENUM(CurveSetType, NODE, LEAF);
 CREATE_ENUM(SearchType, GridBSP, BSP, KD, optKD);
 CREATE_ENUM(EvalType, LinearSample, BinEval);
-CREATE_ENUM(GenerateType, RenderDataBin, RenderDataTxt, Image, TreeDepth, Texture, FacePerBezier, FacePerNurbs);
+CREATE_ENUM(GenerateType, RenderDataBin, RenderDataTxt, Image, TreeDepth, TextureBin, TextureTxt, FacePerBezier, FacePerNurbsIndex, FacePerNurbsMatrix, Cut, CurveList, Sample);
 
 struct PatchProperty
 {
@@ -53,6 +55,7 @@ struct PatchProperty
 	int m_load_mode{ 0 }; // 0 for txt, 1 for bin
 	int m_bezier_wise{ 1 };
 	int m_id{ 0 };
+	int m_tree_only{ 0 };
 };
 
 
@@ -88,4 +91,21 @@ inline void __clamp(T& x, const T x0, const T x1)
 	{
 		x = x1;
 	}
+}
+
+
+template<typename T>
+inline vector<T> __get_linspace(T start, T end, size_t num)
+{
+	assert(end > start);
+	vector<T> res(num);
+	T step = (end - start) / static_cast<T>(num);
+	res[0] = start;
+	for (size_t i = 1; i < num; i++)
+	{
+		res[i] = res[i - 1] + step;
+	}
+	res.back() = end;
+	return res;
+
 }

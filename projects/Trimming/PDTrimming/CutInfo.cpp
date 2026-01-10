@@ -195,7 +195,14 @@ void CutInfo_Grid::act_write(vector<int>& offset, vector<float>& tree, vector<fl
                 {
                     if (cvs_ptr->if_empty())
                     {
-                        offset[i] = cvs_ptr->m_search->m_odt[0];
+                        if (cvs_ptr->m_search->m_odt.size() == 0)
+                        {
+                            offset[i] = 1;
+                        }
+                        else
+                        {
+                            offset[i] = cvs_ptr->m_search->m_odt[0];
+                        }
                     }
                     else
                     {
@@ -302,44 +309,65 @@ void CutInfo_BSP::get_optimal_split()
     double size[2]{ cvs->m_frame.get_size(0), cvs->m_frame.get_size(1)};
     m_node->m_type = NodeType::INVALID;
     Point orth;
-    vector<double> best{ 0,0 };
+    vector<double> best{ INFINITY,INFINITY };
     auto if_better = [](vector<double> &v1, vector<double> &v2)
         {
             double max1 = std::max(v1[0], v1[1]);
             double max2 = std::max(v2[0], v2[1]);
             if (max1 == max2)
             {
-                return (v1[0] + v1[1]) > (v2[0] + v2[1]);
+                return (v1[0] + v1[1]) < (v2[0] + v2[1]);
             }
-            return max1 > max2;
+            return max1 < max2;
         };
 
-
+    //if (m_slabSets[0]->m_totalLength < FLOAT_ZERO_GEOMETRY_COMPARE || m_slabSets[1]->m_totalLength < FLOAT_ZERO_GEOMETRY_COMPARE)
     if (std::min(m_slabSets[0]->m_seamNum, m_slabSets[1]->m_seamNum) == 0)
     {
         m_node->m_type = NodeType::LEAF;
-        return;
     }
-
-    for (size_t i = 0; i < m_candidates.size(); i += 2)
+    else
     {
-        auto intersects = cvs->get_intersects(m_candidates[i], m_candidates[i + 1]);
-        auto cut_value = act_eval_cut(m_candidates[i], m_candidates[i + 1], intersects);
-        //cut_value[0] /= size[0];
-        //cut_value[1] /= size[1];
-        if (if_better(cut_value, best))
+        for (size_t i = 0; i < m_candidates.size(); i += 2) 
         {
-            m_node->m_type = NodeType::BSP;
-            best = cut_value;
-            m_fixedPoint = m_candidates[i];
-            m_orth = m_candidates[i + 1];
-            if (if_best(best))
+            auto cut_value = act_eval_cut2(m_candidates[i], m_candidates[i + 1]);
+            if (if_better(cut_value, best))
             {
-                m_candidates.clear();
-                return;
+                  m_node->m_type = NodeType::BSP;
+                  best = cut_value;
+                  m_fixedPoint = m_candidates[i];
+                  m_orth = m_candidates[i + 1];
+                  if (if_best(best))
+                  {
+                      m_candidates.clear();
+                      return;
+                  }
             }
         }
     }
+
+   // for (size_t i = 0; i < m_candidates.size(); i += 2)
+   // {
+   //     auto intersects = cvs->get_intersects(m_candidates[i], m_candidates[i + 1]);
+   //     auto cut_value = act_eval_cut(m_candidates[i], m_candidates[i + 1], intersects);
+   ///*     cut_value[0] /= size[0];
+   //     cut_value[1] /= size[1];*/
+   //     if (if_better(cut_value, best))
+   //     {
+   //         m_node->m_type = NodeType::BSP;
+   //         best = cut_value;
+   //         m_fixedPoint = m_candidates[i];
+   //         m_orth = m_candidates[i + 1];
+   //         if (if_best(best))
+   //         {
+   //             m_candidates.clear();
+   //             return;
+   //         }
+   //     }
+   // }
+
+
+
     m_candidates.clear();
 }
 
@@ -411,7 +439,7 @@ void CutInfo_BSP::act_cut_node(SpaceNode& node)
     {
         node.m_child[i]->m_curveSetPtr.node->act_edge_to_frame();
     }
-    node.m_curveSetPtr.node->act_generate_curve();
+  
     vector<Point> cutp_all;
     for (auto itec = node.m_curveSetPtr.node->m_curves.begin(); itec != node.m_curveSetPtr.node->m_curves.end(); itec++)
     {
@@ -443,7 +471,11 @@ void CutInfo_BSP::act_build_candidate()
     m_connected_curves.resize(2);
     m_connected_curves[0].clear();
     m_connected_curves[1].clear();
-  
+
+    m_node->m_curveSetPtr.node->act_generate_curve();
+    m_subcurves_ptr = &m_node->m_curveSetPtr.node->m_subcurves;
+    m_curves_ptr = &m_node->m_curveSetPtr.node->m_curves;
+
     for (auto sc : m_node->m_curveSetPtr.node->m_subcurves)
     {
         if (sc->m_ifEdge)
@@ -517,9 +549,19 @@ void CutInfo_BSP::act_build_candidate()
                         p2.act_orthrize();
                         m_candidates.emplace_back(p1);
                         m_candidates.emplace_back(p2);
-                        //double mid = 0.5 * (slb->m_curves[j]->m_frame[2 - 2 * i] + slb->m_curves[j-1]->m_frame[3 - 2 * i]);
-                        //m_candidates.push_back(Point{ mid });
-                        //m_candidates.push_back(orth);
+                        double mid = 0.5 * (slb->m_curves[j]->m_frame[2 - 2 * i] + slb->m_curves[j-1]->m_frame[3 - 2 * i]);
+                        m_candidates.push_back(Point{ mid });
+                        m_candidates.push_back(orth);
+            /*            if (j < slb->m_curves.size() - 1)
+                        {
+                            m_candidates.push_back(Point{ slb->m_curves[j]->m_frame[3 - 2 * i] });
+                            m_candidates.push_back(orth);
+                        }
+                        if (j > 0)
+                        {
+                            m_candidates.push_back(Point{ slb->m_curves[j]->m_frame[2 - 2 * i] });
+                            m_candidates.push_back(orth);
+                        }*/
                     }
                     Point str = (slb->m_curves[j]->m_endPoints[1] - slb->m_curves[j]->m_endPoints[0]);
                     str.act_orthrize();
@@ -541,10 +583,13 @@ void CutInfo_BSP::act_build_candidate()
             }
         }
     }
+
+    //if (m_slabSets[0]->m_length < FLOAT_ZERO_GEOMETRY_COMPARE || m_slabSets[1]->m_length < FLOAT_ZERO_GEOMETRY_COMPARE)
     if (m_slabSets[0]->m_seamNum == 0 || m_slabSets[1]->m_seamNum == 0)
     {
         m_candidates.clear();
     }
+ 
     for (size_t i = 0; i < m_connected_curves.size(); i++)
     {
         __free_vector_ptr(m_connected_curves[i]);
@@ -587,15 +632,59 @@ vector<double> CutInfo_BSP::act_eval_cut(const Point& p0, const Point& orth, vec
     return coverLength;
 }
 
+vector<double> CutInfo_BSP::act_eval_cut2(const Point& p0, const Point& orth)
+{
+    vector<Interval<double>> P0(2), P1(2);
+    vector<double> L0(2), L1(2);
+
+    vector<Point> cutp_all;
+    for (auto ite = m_curves_ptr->begin(); ite != m_curves_ptr->end(); ite++)
+    {
+        vector<Point> ips;
+        (*ite)->get_intersectWithLine(p0, orth, ips);
+        cutp_all.insert(cutp_all.end(), ips.begin(), ips.end());
+    }
+    for (auto ite = m_subcurves_ptr->begin(); ite != m_subcurves_ptr->end(); ite++)
+    {
+        auto cutpara = (*ite)->get_splitByPointsOnCurve(cutp_all);
+        cutpara.insert(cutpara.end(), (*ite)->m_cutPoints.begin(), (*ite)->m_cutPoints.end());
+        (*ite)->act_paraRegularize(cutpara);
+        for (size_t i = 0; i < cutpara.size() - 1; i++)
+        {
+            auto dist = (*ite)->m_curve->get_distWithLine(p0, orth, cutpara[i], cutpara[i + 1]);
+            int side = __getSide(std::get<0>(dist), std::get<1>(dist));
+            //assert(side != -1);
+            Frame f{ (*ite)->m_curve->get_evaluateAt(cutpara[i]) , (*ite)->m_curve->get_evaluateAt(cutpara[i + 1])};
+            if (side == 1)
+            {
+                L1[0] += P1[0].get_union(f[0], f[1], false, false);
+                L1[1] += P1[1].get_union(f[2], f[3], false, false);
+            }
+            else if (side == 0)
+            {
+                L0[0] += P0[0].get_union(f[0], f[1], false, false);
+                L0[1] += P0[1].get_union(f[2], f[3], false, false);
+            }
+        }
+    }
+    vector<double> res(2);
+    res[0] = std::min(L0[0], L0[1]);
+    res[1] = std::min(L1[0], L1[1]);
+    return res;
+}
+
 
 bool CutInfo_BSP::if_best(const vector<double>& value1)
 {
-    if (value1[0] >= 1.0-FLOAT_ZERO_GEOMETRY_COMPARE || value1[1] >= 1.0-FLOAT_ZERO_GEOMETRY_COMPARE)
+    /*if (value1[0] >= 1.0-FLOAT_ZERO_GEOMETRY_COMPARE || value1[1] >= 1.0-FLOAT_ZERO_GEOMETRY_COMPARE)
     {
         return true;
     }
- 
+    
     return false;
+    */
+
+    return (value1[0] < FLOAT_ZERO_GEOMETRY_COMPUTE) && (value1[1] < FLOAT_ZERO_GEOMETRY_COMPUTE);
 }
 
 void CutInfo_BSP::act_trans_points_line(Point& p1, Point& p2)
@@ -686,7 +775,14 @@ void CutInfo_BSP::act_write_leaf(vector<float>& tree, vector<float>& corse, vect
             {
                 if (cvs_ptr->if_empty())
                 {
-                    writeinfo(cvs_ptr->m_search->m_odt[0]);
+                    if (cvs_ptr->m_search->m_odt.size() < 1)
+                    {
+                        writeinfo(-1);
+                    }
+                    else
+                    {
+                        writeinfo(cvs_ptr->m_search->m_odt[0]);
+                    }  
                 }
                 else
                 {
@@ -1247,7 +1343,7 @@ void CutInfo::act_write(vector<int>& offset, vector<float>& tree, vector<float>&
     }
     else
     {
-        throw lf_exception_undefined("Unknown cut type!");
+        throw lf_exception_undefined("Unexcepted node type!");
     }
 }
 

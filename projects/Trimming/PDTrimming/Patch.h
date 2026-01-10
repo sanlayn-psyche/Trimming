@@ -2,8 +2,6 @@
 
 #include "TrimShared.h"
 
-
-
 class Patch
 {
 public:
@@ -40,6 +38,7 @@ public:
 	int get_maxOrderOfCurve();
 	float get_coverage(float x, float y) const;
 	float get_coverage_cstyle(float loc_dom[2]) const;
+	int get_searchtime_cstyle(float loc_dom[2]) const;
 
 	void act_generate_tesser_data();
 	int get_search_time(double u, double v);
@@ -61,12 +60,14 @@ public:
 	vector<int> act_oddEvenTest(vector<Point> &odt_p);
 
 	void act_outputImageFixedUV(const std::string& root, const vector<Point>& PS);
-	void act_opuput(GenerateType type, const string& root);
+	void act_output(GenerateType type, const string& root);
 
 	vector<TrimLoop*> m_loops;
 	Frame m_frame;
 	bool m_initialed{ false };
 	PatchProperty* m_properties{ nullptr };
+
+	NurbsFace* m_surface{ nullptr };
 private:
 	struct OutputInterface
 	{
@@ -78,7 +79,12 @@ private:
 	__make_tool_map<OutputInterface, GenerateType, OutputProxy> m_output_proxy;
 
 	int m_max_depth{ 0 };
-	NurbsFace* m_surface{ nullptr };
+
+	int m_bezier_curve_cnt{ 0 };
+	int m_bezier_surf_cnt{ 0 };
+	int m_bezier_curve_data{ 0 };
+	int m_bezier_surf_data{ 0 };
+
 
     // nodes
 	vector<SpaceNode*> m_nodes; // all nodes, including roots and leaves

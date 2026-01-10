@@ -12,12 +12,10 @@ using std::string;
 using std::vector;
 class Patch;
 
-const std::string Root {RootPath};
-
 class TrimManager
 {
 public:
-	TrimManager();
+	TrimManager(const char* config);
 	~TrimManager();
 	TrimManager(const TrimManager& tm) = delete;
 	TrimManager(TrimManager&& tm) = delete;
@@ -32,6 +30,7 @@ public:
 	bool act_updataModleInfo();
 	bool act_combineWhileResolve();
 	bool act_resolveModel();
+	void act_combine();
 
 	void act_checkFile();
 	void act_combineTexture();

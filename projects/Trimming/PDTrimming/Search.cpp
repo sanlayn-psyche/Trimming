@@ -100,15 +100,15 @@ float SearchDelegate_KD::get_dist(const int* offset, const float* tree, const fl
         p2[1] = corse[4 * i + 3];
         if (eval->get_side(1, v, p1, p2) == 0)
         {
-            int side = 0;// eval->get_side(0, u, p1, p2);
-            if (u >= std::max(p1[0], p2[0]))
+            int side = eval->get_side(0, u, p1, p2);
+           /* if (u >= std::max(p1[0], p2[0]))
             {
                 side = 1;
             }
             else if (u <= std::min(p1[0], p2[0]))
             {
                 side = -1;
-            }
+            }*/
 
             if (side == 0)
             {
@@ -142,6 +142,93 @@ void SearchDelegate_KD::act_merge_file(vector<int>& offsets, vector<int>& datasi
         outputs[i].write((char*)data.data(), datasize[i] * 4);
     }
     for (size_t k = 0; k < 4; k++) offsets[k] += datasize[k];
+}
+
+int SearchDelegate_KD::get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const
+{
+
+    int pos = 0;
+    int dir = tree[0];
+    float key = tree[1];
+
+    int searchtime = 0;
+
+    while (dir <= 1)
+    {
+        float check_value = u;
+        if (dir == 1)
+        {
+            check_value = v;
+        }
+        if (check_value < key)
+        {
+            pos = tree[pos * 4 + 2];
+        }
+        else
+        {
+            pos = tree[pos * 4 + 3];
+        }
+        dir = tree[pos * 4];
+        key = tree[pos * 4 + 1];
+    }
+
+    int loc = *(int*)(tree + 4 * pos + 3);
+    if (abs(loc) <= 1)
+    {
+        return float(loc);
+    }
+
+    corse += (-loc - 2);
+    int num_curveset = corse[0];
+    int num_slab = corse[1];
+    corse += 2;
+    int ite = 0;
+    while (ite < num_slab - 1 && v >= corse[ite + 1])
+    {
+        ite++;
+    }
+    if (ite >= num_slab - 1)
+    {
+        ite = num_slab - 2;
+    }
+    corse += num_slab;
+    float dist = corse[ite];
+    corse += num_slab - 1;
+
+    for (int i = 0; i < num_curveset; i++)
+    {
+        searchtime++;
+        Point p1, p2;
+        p1[0] = corse[4 * i];
+        p1[1] = corse[4 * i + 1];
+        p2[0] = corse[4 * i + 2];
+        p2[1] = corse[4 * i + 3];
+        if (eval->get_side(1, v, p1, p2) == 0)
+        {
+            int side = eval->get_side(0, u, p1, p2);
+            /* if (u >= std::max(p1[0], p2[0]))
+             {
+                 side = 1;
+             }
+             else if (u <= std::min(p1[0], p2[0]))
+             {
+                 side = -1;
+             }*/
+
+            if (side == 0)
+            {
+                int pos = abs(*(int*)(corse + 4 * num_curveset + i));
+                dist *= eval->get_dist(fine, u, v, p1, p2, pos);
+                dist *= p2[1];
+                searchtime += eval->get_seachtime(fine, u, v, p1, p2, pos);
+            }
+            else if (side == -1)
+            {
+                dist *= -1.0;
+            }
+        }
+    }
+    return searchtime;
 }
 
 void SearchDelegate_KD::act_opt_overlap(CurveSet_NODE& node)
@@ -487,7 +574,7 @@ SpaceNode* SearchDelegate::act_genetate_tree(SpaceNode* root, int maxdepth)
         {
             auto ite = visitList.back();
             visitList.pop_back();
-            if (ite->m_depth_tree >= maxdepth)
+            if (ite->m_depth_tree > maxdepth)
             {
                 return ite;
             }
@@ -505,6 +592,7 @@ SpaceNode* SearchDelegate::act_genetate_tree(SpaceNode* root, int maxdepth)
 
 void SearchDelegate::act_generate(vector<SpaceNode*>& roots)
 {
+    //throw lf_exception_node(roots[0]);
     for (auto root: roots) 
     {
         //throw lf_exception_node(root);
@@ -585,11 +673,10 @@ void SearchDelegate_GridBSP::act_generate(vector<SpaceNode*>& roots)
         rootList.pop_back();
         ite->m_cutInfo = new CutInfo_Grid(*ite, m_grid_size[0], m_grid_size[1]);
         ite->m_cutInfo->act_cut_node(*ite);
-     
         for (auto itec: ite->m_child)
         {
             auto iteend = act_genetate_tree(itec, m_max_depth);
-            if (iteend->m_depth_tree >= m_max_depth)
+            if (iteend->m_depth_tree > m_max_depth)
             {
                 if (itec->m_depth_forest >= m_max_grid_depth)
                 {
@@ -663,9 +750,9 @@ void SearchDelegate_GridBSP::act_merge_file(vector<int>& offsets, vector<int>& d
         int start = k - 2 + 3 + 3 * odd_even_num + 4 * sub_curve_num;
         for (int ks = start; ks < start + sub_curve_num; ks++)
         {
-            if (abs(offset_table[ks]) > 1)
+            if (abs(offset_table[ks]) != 1)
             {
-                if (offset_table[ks] >= 2)
+                if (offset_table[ks] >= 0)
                 {
                     offset_table[ks] += offsets[3];
                 }
@@ -765,10 +852,7 @@ void SearchDelegate_GridBSP::act_fill_leaf(SpaceNode* node)
                     cut->act_build_candidate();
                     cut->get_optimal_split();
                     auto cut2 = new CutInfo_BSP(cut->m_index, cut->m_keyValue);
-                    if (ite->m_type == NodeType::LEAF)
-                    {
-                        ite->m_type = NodeType::BSP;
-                    }
+                    ite->m_type = NodeType::BSP;
                     delete cut;
                     cut2->set_node(*ite);
                     SearchDelegate::act_genetate_tree(ite, m_max_depth);
@@ -798,6 +882,13 @@ float SearchDelegate_BSP::get_dist(const int* offset, const float* tree, const f
     int pos = offset[0];
     pos = act_search(tree, u, v, pos);
     return act_search_leaf(corse, fine, u, v, pos, eval);
+}
+
+int SearchDelegate_BSP::get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const
+{
+    int pos = offset[0];
+    pos = act_search(tree, u, v, pos);
+    return get_leaf_searchtime(corse, fine, u, v, pos, eval);
 }
 
 int SearchDelegate_BSP::act_search(const float* tree, float u, float v, int pos) const
@@ -917,6 +1008,93 @@ float SearchDelegate_BSP::act_search_leaf(const float* corse, const float* fine,
     return eval->get_dist(fine, u, v, p1, p2, fine_offset);
 }
 
+int SearchDelegate_BSP::get_leaf_searchtime(const float* corse, const float* fine, float u, float v, int pos, const EvalDelegate* eval) const
+{
+    if (pos >= -1)
+    {
+        return pos;
+    }
+    int seatchtime = 0;
+
+    corse = corse - (pos + 2);
+    int dir = corse[0];
+    int blank_num = corse[1];
+    int curve_num = corse[2];
+
+    corse += 3;
+    int start = 1;
+    int end = curve_num + 1;
+
+    float check_value = u;
+    if (dir == 1)
+    {
+        check_value = v;
+    }
+
+    int loc = -1;
+    int i = 0;
+    for (; i < blank_num; i++)
+    {
+        if (corse[i * 3] <= check_value && corse[i * 3 + 1] >= check_value)
+        {
+            loc = i;
+            break;
+        }
+        if (corse[i * 3] >= check_value)
+        {
+            end = corse[i * 3 + 2];
+            break;
+        }
+        if (corse[i * 3 + 1] <= check_value)
+        {
+            start = corse[i * 3 + 2];
+            continue;
+        }
+    }
+    if (loc != -1 || curve_num == 0)
+    {
+        return corse[i * 3 + 2] > 0.f ? 1 : -1;
+    }
+
+    corse += 3 * blank_num;
+    start = abs(start) - 1;
+    end = abs(end) - 1;
+    int mid = (start + end) / 2;
+    Point p1, p2;
+    while ((end - start > 1))
+    {
+        seatchtime++;
+        p1[0] = corse[4 * mid];
+        p1[1] = corse[4 * mid + 1];
+        p2[0] = corse[4 * mid + 2];
+        p2[1] = corse[4 * mid + 3];
+        int side = eval->get_side(dir, check_value, p1, p2);
+        if (side == 0)
+        {
+            break;
+        }
+        if (side == 1)
+        {
+            start = mid + 1;
+        }
+        else
+        {
+            end = mid;
+        }
+        mid = (start + end) / 2;
+    }
+    if (mid >= curve_num)
+    {
+        mid = curve_num - 1;
+    }
+    p1[0] = corse[4 * mid];
+    p1[1] = corse[4 * mid + 1];
+    p2[0] = corse[4 * mid + 2];
+    p2[1] = corse[4 * mid + 3];
+    int fine_offset = *(int*)(corse + 4 * curve_num + mid);
+    return seatchtime + eval->get_seachtime(fine, u, v, p1, p2, fine_offset);
+}
+
 
 void SearchDelegate_BSP::act_generate_cut(SpaceNode* ite)
 {
@@ -926,8 +1104,6 @@ void SearchDelegate_BSP::act_generate_cut(SpaceNode* ite)
         SearchDelegate::act_generate_cut(ite);
     }
 }
-
-
 
 SearchDelegateLeaf_BSP::SearchDelegateLeaf_BSP(CurveSet_LEAF& leaf)
 {
@@ -975,6 +1151,7 @@ void SearchDelegateLeaf_BSP::act_preprosess(NurbsFace& surf)
         m_leaf->get_mid_points(p1, 1-m_dir);
         m_point_to_odt.push_back(p1);
     }
+
     m_eval->m_curves = std::move(m_leaf->m_subcurves);
     m_leaf->m_subcurves.clear();
     m_eval->set_dir(m_dir);
@@ -1274,6 +1451,10 @@ void SearchDelegateLeaf_KD::get_odt_points()
 
 void SearchDelegateLeaf::set_dir(int dir)
 {
+    if (dir == -1)
+    {
+        throw lf_exception_curveset(&m_leaf->m_subcurves, "illegal leaf node!");
+    }
     m_dir = dir;
 }
 
@@ -1342,10 +1523,6 @@ void SearchDelegateLeaf::act_write(vector<float>& corseSample, vector<float>& cu
 
 }
 
-
-void SearchDelegateLeaf::act_preprosess(NurbsFace& surf)
-{
-}
 
 void SearchDelegateLeaf::act_postprosess()
 {
@@ -1561,4 +1738,47 @@ void SearchDelegateLeaf_optKD::act_write(vector<float>& corseSample, vector<floa
         corseSample.push_back(max_off);
     }
     m_eval->act_write(corseSample, curveDetail);
+}
+
+SearchDelegate_QuadTree::SearchDelegate_QuadTree()
+{
+    m_grid_size[0] = 2;
+    m_grid_size[1] = 2;
+    m_if_uniform = true;
+    m_type = SearchType::GridBSP;
+}
+
+SearchDelegate_QuadTree::~SearchDelegate_QuadTree() = default;
+
+void SearchDelegate_QuadTree::act_generate(vector<SpaceNode*>& roots)
+{
+    std::vector<SpaceNode*> rootList = roots;
+    while (rootList.size() > 0)
+    {
+        auto ite = rootList.back();
+        rootList.pop_back();
+
+        if (if_tosplit(ite))
+        {
+            ite->m_cutInfo = new CutInfo_Grid(*ite, m_grid_size[0], m_grid_size[1]);
+            ite->m_cutInfo->act_cut_node(*ite);
+            rootList.insert(rootList.end(), ite->m_child.begin(), ite->m_child.end());
+        }
+    }
+}
+
+bool SearchDelegate_QuadTree::if_tosplit(SpaceNode* node)
+{
+    if (node->m_depth_tree > 13)
+    {
+        return false;
+    }
+  
+    int cnt = 0;
+    for (auto cv_ite: node->m_curveSetPtr.node->m_subcurves)
+    {
+        cnt += std::max(abs(cv_ite->m_spanIdx[1] - cv_ite->m_spanIdx[0]), 1);
+    }
+    return cnt > 2;
+    //return node->m_curveSetPtr.node->m_subcurves.size() > 2;
 }

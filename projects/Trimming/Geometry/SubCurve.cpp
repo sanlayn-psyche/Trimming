@@ -696,7 +696,7 @@ double BiMonoSubCurve::get_aaIntersects(int dir, Point& p, double s, double t) c
         p = m_curve->get_evaluateAt(m);
         if (k > 10000)
         {
-            throw lf_exception_subcurves({ this }, "Infinite iteration!");
+            break;
         }
         if ((p.get_cord(dir) < xy) == ifinc)
         {
@@ -709,7 +709,7 @@ double BiMonoSubCurve::get_aaIntersects(int dir, Point& p, double s, double t) c
     }
     if ((fabs(p.get_cord(dir) - xy) > FLOAT_ZERO_GEOMETRY_COMPARE))
     {
-        throw std::runtime_error("Erro: failed to find the intesets point!");
+        throw lf_exception_subcurves({ this }, "failed to find the intesets point!");
     }
     return m;
 }

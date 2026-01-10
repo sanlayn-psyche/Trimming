@@ -30,7 +30,7 @@ public:
 
 	void act_preposess();
 	int get_data_size();
-
+	int get_bezier_cnt();
 private:
 	void act_sortAndHealCurve();
 	SubCurve* act_drawNearest(const Curve* cur, vector<Curve*> &curs,double &dist, bool &ifrevers);

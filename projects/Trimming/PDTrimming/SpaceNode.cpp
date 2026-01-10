@@ -274,7 +274,6 @@ void lf_exception_node::act_output() const
 
 #if defined(LF_EXCEPTION)
 
-
 const void lf_exception_node::act_generate_info() const
 {
     const SpaceNode* spn = (const SpaceNode*)m_suspect;

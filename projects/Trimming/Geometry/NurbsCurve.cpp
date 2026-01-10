@@ -363,8 +363,18 @@ void NurbsCurve::act_loadFromTxt(std::ifstream& fin)
 
 int NurbsCurve::get_data_size()
 {
-    return 1 + m_spans.size() + m_mults.size() + m_controlPoints.size() * 3;;
+    return (1 + m_spans.size() + m_mults.size() + m_controlPoints.size() * 3) * 4;
 }
+
+int NurbsCurve::get_bezier_cnt()
+{
+    if (m_spans.size() <= 1)
+    {
+        return 0;
+    }
+    return m_spans.size() - 1;
+}
+
 
 Point NurbsCurve::get_divAt(double t, int divOrder, int dir) const
 {

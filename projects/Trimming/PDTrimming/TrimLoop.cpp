@@ -382,12 +382,22 @@ void TrimLoop::act_preposess()
 
 int TrimLoop::get_data_size()
 {
-    int datasize = 0;
+    int datasize = 4;
     for (size_t i = 0; i < m_curves.size(); i++)
     {
         datasize += m_curves[i]->get_data_size();
     }
     return datasize;
+}
+
+int TrimLoop::get_bezier_cnt()
+{
+    int bezier = 0;
+    for (size_t i = 0; i < m_curves.size(); i++)
+    {
+        bezier += m_curves[i]->get_bezier_cnt();
+    }
+    return bezier;
 }
 
 

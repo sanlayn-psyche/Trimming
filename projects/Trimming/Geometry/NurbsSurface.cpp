@@ -155,8 +155,7 @@ void NurbsFace::get_evaluate(vector<double> &domain_u, vector<double> &domain_v,
             vertex[i * l + j] = get_evaluateAt(domain_u[i], domain_v[j]);
         }
     }
-    
-   
+
     for (int i = 0; i < static_cast<int>(domain_u.size()) - 1; i++)
     {
         for (int j = 0; j < static_cast<int>(domain_v.size()) - 1; j++)
@@ -166,6 +165,24 @@ void NurbsFace::get_evaluate(vector<double> &domain_u, vector<double> &domain_v,
         }
     }
 }
+
+
+void NurbsFace::get_evaluate(vector<double>& domain_u, vector<double>& domain_v, vector<vector<Point3D>>& vertex) const
+{
+    int l = static_cast<int>(domain_v.size());
+    vertex.resize(domain_u.size());
+    for (size_t i = 0; i < domain_u.size(); i++)
+    {
+        vertex[i].resize(l);
+        for (size_t j = 0; j < domain_v.size(); j++)
+        {
+            vertex[i][j] = get_evaluateAt(domain_u[i], domain_v[j]);
+        }
+    }
+}
+
+
+
 void NurbsFace::get_evaluate(double u1, double u2, double v1, double v2, vector<Point3D>& vertex, vector<TriIndex>& index) const
 {
     double su = (u2 - u1) / 30.0;
@@ -216,13 +233,10 @@ void NurbsFace::act_evalAll(double stepx, double stepy, vector<Point3D> &vertex,
     {
         V.push_back(m_spans[1].back());
     }
-
-   
-    get_evaluate(U, V, vertex, index);
-    
+    get_evaluate(U, V, vertex, index);   
 }
 
-void NurbsFace::act_evalGrid(double stepx, double stepy, vector<vector<Point3D>>& vertex) const
+void NurbsFace::act_evalAll(double stepx, double stepy, vector<vector<Point3D>>& vertex) const
 {
     size_t ut = static_cast<int>(ceil((m_spans[0].back() - m_spans[0].front()) / stepx));
     size_t vt = static_cast<int>(ceil((m_spans[1].back() - m_spans[1].front()) / stepy));
@@ -248,17 +262,7 @@ void NurbsFace::act_evalGrid(double stepx, double stepy, vector<vector<Point3D>>
     {
 		V.push_back(m_spans[1].back());
 	}
-
-    vertex.resize(U.size());
-
-    for (size_t i = 0; i < U.size(); i++)
-    {
-        vertex[i].resize(V.size());
-        for (size_t j = 0; j < V.size(); j++)
-        {
-            vertex[i][j] = get_evaluateAt(U[i], V[j]);
-        }
-    }
+    get_evaluate(U, V, vertex);
 }
 
 void NurbsFace::get_evalPoints(vector<Point> &ps, vector<Point3D> &vertex) const
@@ -294,6 +298,11 @@ std::vector<float> NurbsFace::get_bezierControlPoints(double u1, double u2, doub
 int NurbsFace::get_bezier_cnt() const
 {
     return (m_spans[0].size() - 1) * (m_spans[1].size() - 1);
+}
+
+int NurbsFace::get_data_size() const
+{
+    return ((m_spans[0].size() + m_spans[1].size()) * 2 + m_controlPoints.size() * m_controlPoints[0].size() * 4) * 4;
 }
 
 Point3D NurbsFace::get_partialDiv(double u, double v, int dir) const

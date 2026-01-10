@@ -30,7 +30,7 @@
         "compile": true,
         "static": true,
         "export_headers": [
-            "include/api.h"
+            "PDTrimming/TrimManager.h"
         ],
         "install_dir": "install/"
     }

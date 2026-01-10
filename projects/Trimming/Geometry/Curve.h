@@ -8,6 +8,7 @@ public:
 	Curve();
 	virtual ~Curve();
 	virtual int get_data_size() = 0;
+	virtual int get_bezier_cnt() = 0;
 	virtual void act_loadFromTxt(std::ifstream& fin) = 0;
 	virtual void act_loadFromBin(std::ifstream& fin) = 0;
 	// div order: 0 for evaluate, 1 for first order div....; dir: decide to use which side for div computition. 1 for right, -1 for left.
@@ -102,6 +103,7 @@ public:
 	void act_loadFromTxt(std::ifstream& fin) override;
 	void act_loadFromBin(std::ifstream& fin) override;
 	int get_data_size() override;
+	int get_bezier_cnt() override;
 	void act_findMonoPoints() override;
 	void act_write(vector<float>& curveDetail, double u, double v) override;
 	void act_flip() override;

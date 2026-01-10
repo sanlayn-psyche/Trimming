@@ -52,6 +52,7 @@ public:
 
 	//void operator +=(Interval &inter);
 	void act_union(T a, T b, bool isopena = true, bool isopenb = true);
+	T get_union(T a, T b, bool isopena = true, bool isopenb = true);
 	void act_union(const Range<T> &range);
 	void act_union(Interval& inter);
 	void act_reset();
@@ -432,8 +433,17 @@ inline T Interval<T>::get_intesect(T a, T b, T c, T d)
 template<typename T>
 inline void Interval<T>::act_union(T a, T b, bool isopena, bool isopenb)
 {
+	get_union(a, b, isopena, isopenb);
+}
+
+
+template<typename T>
+inline T Interval<T>::get_union(T a, T b, bool isopena, bool isopenb)
+{
+	T ulength{0};
 	if (if_inputValid(a, b, isopena, isopenb))
 	{
+		
 		if (m_intervals.size() == 0)
 		{
 			m_intervals = { a, b };
@@ -441,6 +451,8 @@ inline void Interval<T>::act_union(T a, T b, bool isopena, bool isopenb)
 		}
 		else
 		{
+			ulength = get_intesect(a, b);
+
 			int i = 0, j = 0;
 			bool ifinserta = false, ifinsertb = false;
 			//bool ifiinc = false;
@@ -448,7 +460,6 @@ inline void Interval<T>::act_union(T a, T b, bool isopena, bool isopenb)
 			for (; i < m_intervals.size() && a > m_intervals[i]; i++);
 			j = i;
 			for (; j < m_intervals.size() && b > m_intervals[j]; j++);
-
 
 			if (i >= m_intervals.size() || a < m_intervals[i])
 			{
@@ -469,11 +480,10 @@ inline void Interval<T>::act_union(T a, T b, bool isopena, bool isopenb)
 				}
 				else
 				{
-					m_isOpen[i] = m_isOpen[i] && isopena;
+					m_isOpen[i] = m_isOpen[i] && isopena;					
 					i++;
 				}
 			}
-
 
 			if (j >= m_intervals.size() || b < m_intervals[j])
 			{
@@ -519,6 +529,7 @@ inline void Interval<T>::act_union(T a, T b, bool isopena, bool isopenb)
 
 		}
 	}
+	return ulength;
 }
 
 template<typename T>

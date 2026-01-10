@@ -15,6 +15,7 @@ public:
 	virtual void act_collect_nodes(vector<SpaceNode*>& roots, vector<SpaceNode*>& nodes, vector<SpaceNode*>& leaf);
 	virtual int if_empty(int* root, float *tree);
 	virtual float get_dist(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate *eval) const = 0;
+	virtual int get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const = 0;
 
 	virtual void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) = 0;
 	SearchType m_type{ SearchType::__UNDEF };
@@ -32,11 +33,13 @@ public:
 	virtual ~SearchDelegate_BSP();
 	void set_leaf(CurveSet_LEAF& leaf) const override;
 	float get_dist(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override;
+	int get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override;
 
 protected:
 
 	int act_search(const float* tree, float u, float v, int pos) const;
 	float act_search_leaf(const float* corse, const float* fine, float u, float v, int pos, const EvalDelegate* eval) const;
+	int get_leaf_searchtime(const float* corse, const float* fine, float u, float v, int pos, const EvalDelegate* eval) const;
 
 	void act_generate_cut(SpaceNode* ite) override;
 	void act_kd_refine(SpaceNode* node, int max_depth);
@@ -58,6 +61,8 @@ public:
 	float get_dist(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override;
 	void act_generate_default(vector<SpaceNode*>& roots) override;
 	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) override;
+	int get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override;
+
 
 protected:
 	void act_generate_cut(SpaceNode* ite) override;
@@ -90,9 +95,12 @@ public:
 	SearchDelegate_optKD(double m_area, int max_depth = 100);
 	~SearchDelegate_optKD();
 	float get_dist(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override;
+	int get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override { return 0; };
+
 	void set_root(SpaceNode& root, vector<TrimLoop*>& loops) override;
 	void set_area(const double area);
 	void set_leaf(CurveSet_LEAF& leaf) const override;
+
 private:
 	void act_generate_cut(SpaceNode* ite) override;
 };
@@ -101,13 +109,14 @@ private:
 class SearchDelegate_GridBSP : public SearchDelegate_BSP
 {
 public:
-	SearchDelegate_GridBSP(int splitrate_u = 7, int splitrate_v = 7, int max_tree_depth = 3, int max_forest_depth = 8, bool if_kdrefine = false);
+	SearchDelegate_GridBSP(int splitrate_u = 7, int splitrate_v = 7, int max_tree_depth = 2, int max_forest_depth = 8, bool if_kdrefine = false);
 	~SearchDelegate_GridBSP();
 	void act_generate_default(vector<SpaceNode*>& roots) override;
 	void act_generate(vector<SpaceNode*>& roots) override;
 	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) override;
 	int if_empty(int* root, float* tree);
-private:
+
+protected:
 	void act_blank_cut(SpaceNode* node);
 	void act_fill_leaf(SpaceNode* node);
 
@@ -118,6 +127,20 @@ private:
 };
 
 
+class SearchDelegate_QuadTree : public SearchDelegate_GridBSP
+{
+public:
+	SearchDelegate_QuadTree();
+	~SearchDelegate_QuadTree();
+
+	void act_generate(vector<SpaceNode*>& roots) override;
+private:
+	bool if_tosplit(SpaceNode* node);
+};
+
+
+
+
 class SearchDelegateLeaf
 {
 public: 
@@ -125,7 +148,7 @@ public:
 	virtual ~SearchDelegateLeaf();
 
 	virtual void act_write(vector<float>& corseSample, vector<float>& curveDetail);
-	virtual void act_preprosess(NurbsFace& surf);
+	virtual void act_preprosess(NurbsFace& surf) = 0;
 	virtual void act_postprosess();	
 	virtual bool if_empty();
 
@@ -170,8 +193,10 @@ public:
 	static int act_search(float* uv, float* corse, float* detail, float& dist);
 	void act_postprosess() override;
 	void set_dir(int dir) override;
-protected:
+
 	vector<double> m_vslab;
+protected:
+
 	void get_odt_points() override;
 };
 

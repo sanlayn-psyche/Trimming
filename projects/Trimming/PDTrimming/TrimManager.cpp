@@ -22,10 +22,21 @@
 #include <filesystem>
 #include <future>
 #include <thread>
+#include <mutex>
 #include <set>
 #include <map>
 #include <vector>
 #include <stdint.h>
+#include <sstream>
+
+std::mutex __print_mutex;
+
+void __atomic_print(const std::string& message) 
+{
+    std::lock_guard<std::mutex> lock(__print_mutex);
+    std::cout << message << std::endl;
+}
+
 
 std::atomic<unsigned> g_threadCnt = 0;
 
@@ -38,26 +49,24 @@ void GetClock(int64_t& clock)
     clock = value.count();
 }
 
-TrimManager::TrimManager()
+TrimManager::TrimManager(const char* config)
 {
     init_debug();
-
     m_config = new nlohmann::json;
-    std::ifstream ifs(Root + "/config.json");
+    std::ifstream ifs(config);
     ifs >> *m_config;
     ifs.close();
-
     m_patch_prop.m_load_mode = 0;
     (*m_config)["Trimming"]["PatchPerFolder"].get_to(m_patchCntPerFolder);
     (*m_config)["Trimming"]["BezierWise"].get_to(m_patch_prop.m_bezier_wise);
 
     string type;
     (*m_config)["Trimming"]["EvalMethod"].get_to(type);
-    if (!type.compare("LS"))
+    if (!type.compare("ls"))
     {
         m_patch_prop.m_eval_ptr = std::make_shared<EvalDelegate_ls>();
     }
-    else if (!type.compare("BE"))
+    else if (!type.compare("bin"))
     {
         m_patch_prop.m_eval_ptr = std::make_shared<EvalDelegate_bineval>();
     }
@@ -66,29 +75,32 @@ TrimManager::TrimManager()
         throw std::runtime_error("Undedined evaluate method!");
     }
 
-
     (*m_config)["Trimming"]["SearchMethod"].get_to(type);
-    if (!type.compare("GRIDBSP"))
+    if (!type.compare("gb"))
     {
         m_patch_prop.m_search_ptr = std::make_shared<SearchDelegate_GridBSP>();
     }
-    else if (!type.compare("BSP"))
+    else if (!type.compare("bsp"))
     {
         m_patch_prop.m_search_ptr = std::make_shared<SearchDelegate_BSP>();
     }
-    else if (!type.compare("KD"))
+    else if (!type.compare("kd"))
     {
         m_patch_prop.m_search_ptr = std::make_shared<SearchDelegate_KD>(1.0, 200);
     }
-    else if (!type.compare("optKD"))
+    else if (!type.compare("optkd"))
     {
         m_patch_prop.m_search_ptr = std::make_shared<SearchDelegate_optKD>(1.0, 200);
+    }
+    else if (!type.compare("quad"))
+    {
+        m_patch_prop.m_search_ptr = std::make_shared<SearchDelegate_QuadTree>();
     }
     else
     {
         throw std::runtime_error("Undedined search method!");
     }
-
+    (*m_config)["Trimming"]["OnlyTree"].get_to(m_patch_prop.m_tree_only);
     (*m_config)["Trimming"]["GenerateMode"].get_to(m_generateMode);
 
     string root, model;
@@ -130,7 +142,7 @@ TrimManager::~TrimManager()
 void TrimManager::run()
 {
     act_resolveModel();
-    m_combine_proxy.get(static_cast<GenerateType>(m_generateMode))->act_combine(*this);
+    act_combine();
 }
 
 bool TrimManager::init_debug()
@@ -214,15 +226,25 @@ void TrimManager::init_resolve()
             checkWord = { "tree_depth" };
             break;
         }
-        case 4:
+        case 4: // texture
         {
-            checkWord = { "texture" };
+            checkWord = { "trimming" };
+            break;
+        }
+        case 9: // cut
+        {
+            checkWord = { "edge" };
+            break;
+        }
+        case 10: // curve list
+        {
+            checkWord = { "trimming" };
             break;
         }
         default:
         {
             std::cout << "Error: undefined generatemode!" << std::endl;
-            return;
+            break;
         }
     }
 
@@ -393,6 +415,11 @@ struct TrimManager::CombineProxy<GenerateType::RenderDataBin> : public TrimManag
         vector<int> data_offset;
         int trimmed_bezier_cnt = 0;
 
+        size_t bezier_surf_cnt = 0;
+        size_t bezier_surf_data = 0;
+        size_t bezier_curve_cnt = 0;
+        size_t bezier_curve_data = 0;
+
         int size = 0;
         int flag = 0;
         vector<int> flag_notrim;
@@ -453,7 +480,6 @@ struct TrimManager::CombineProxy<GenerateType::RenderDataBin> : public TrimManag
                 fins[1].read((char*)data_frame.data(), 4 * 4);
                 fouts[6].write((char*)data_frame.data(), 4 * 4);
 
-
                 // trimming data
                 vector<int> data_size(4);
                 fins[0].read((char*)data_size.data(), 16);
@@ -485,6 +511,15 @@ struct TrimManager::CombineProxy<GenerateType::RenderDataBin> : public TrimManag
                 frame_notrim.insert(frame_notrim.end(), data_frame.begin(), data_frame.end());
             }
 
+            fins[0].read((char*)&write_cnt, 4);
+            bezier_surf_cnt += write_cnt;
+            fins[0].read((char*)&write_cnt, 4);
+            bezier_surf_data += write_cnt;
+            fins[0].read((char*)&write_cnt, 4);
+            bezier_curve_cnt += write_cnt;
+            fins[0].read((char*)&write_cnt, 4);
+            bezier_curve_data += write_cnt;
+
             for (auto& fin : fins)
             {
                 fin.close();
@@ -510,7 +545,10 @@ struct TrimManager::CombineProxy<GenerateType::RenderDataBin> : public TrimManag
         (*tmg.m_modelInfo)["Trimming"]["Tree_Size"] = static_cast<int>(offsets[1] * 4);
         (*tmg.m_modelInfo)["Trimming"]["CurveSet_Size"] = static_cast<int>(offsets[2] * 4);
         (*tmg.m_modelInfo)["Trimming"]["CurveDetail_Size"] = static_cast<int>(offsets[3] * 4);
- 
+
+        (*tmg.m_modelInfo)["Trimming"]["BezierCurve_DataSize"] = bezier_curve_data;
+        (*tmg.m_modelInfo)["Trimming"]["BezierCurve_Cnt"] = bezier_curve_cnt;
+
         (*tmg.m_modelInfo)["Trimming"]["Roots"] = namePrefix + "_roots.bin";
         (*tmg.m_modelInfo)["Trimming"]["Tree"] = namePrefix + "_tree.bin";
         (*tmg.m_modelInfo)["Trimming"]["CurveSet"] = namePrefix + "_curveset.bin";
@@ -524,14 +562,16 @@ struct TrimManager::CombineProxy<GenerateType::RenderDataBin> : public TrimManag
         (*tmg.m_modelInfo)["Geometry"]["Flag"] = namePrefix + "_flag.bin";
         (*tmg.m_modelInfo)["Geometry"]["BezierNum"] = bezier_cnt_total;
         (*tmg.m_modelInfo)["Geometry"]["TrimmedBezierNum"] = trimmed_bezier_cnt;
-      
+
+        (*tmg.m_modelInfo)["Geometry"]["BezierSurf_DataSize"] = bezier_surf_data;
+        (*tmg.m_modelInfo)["Geometry"]["BezierSurf_Cnt"] = bezier_surf_cnt;
+
+        
         (*tmg.m_modelInfo)["MergedPatchNum"] = tmg.m_totalNumber - mis_patch_cnt;
 
         std::cout << std::endl;
         std::cout << "File merging finished!" << std::endl << std::endl;
-
         std::cout << "#NURBS patch: " << tmg.m_totalNumber << std::endl;
-
         std::cout << "#NURBS patch with wrong trimming: " << mis_patch_cnt << std::endl << std::endl;
 
         (*tmg.m_modelInfo)["Trimming"]["MergeDone"] = 1;
@@ -667,6 +707,11 @@ bool TrimManager::act_resolveModel()
     }
     act_updataModleInfo();
     return true;
+}
+
+void TrimManager::act_combine()
+{
+    m_combine_proxy.get(static_cast<GenerateType>(m_generateMode))->act_combine(*this);
 }
 
 void TrimManager::act_checkFile()
@@ -812,6 +857,11 @@ void TrimManager::act_resolve(int id, Patch* patch_ptr)
 void TrimManager::act_resolveOne(TrimManager* tm_ptr, std::atomic<int64_t>* clock, PatchProperty* prop)
 {
     g_threadCnt.fetch_add(1);
+ 
+    std::stringstream info;
+    info << "Create thread id# " << std::this_thread::get_id();
+    __atomic_print(info.str());
+
     std::ifstream fin;
     PatchProperty pr = PatchProperty(std::move(*prop));
     if (tm_ptr->m_patch_prop.m_load_mode == 0)
@@ -850,10 +900,10 @@ void TrimManager::act_resolveOne(TrimManager* tm_ptr, std::atomic<int64_t>* cloc
                 tm_ptr->m_errorLog.open(tm_ptr->m_jsonRoot + "error_log.txt");
                 tm_ptr->m_ifErrorDetected = true;
             }
-            
-            string error_info = "path id# " + std::to_string(patch_to_process) + " " + error.what();
-            std::cout << error_info << std::endl;
-            tm_ptr->m_errorLog << error_info << std::endl;
+            error.set_patchid(patch_to_process);
+            auto info = error.what();
+            __atomic_print(info);
+            tm_ptr->m_errorLog << info << std::endl;
 #ifdef _DEBUG    
             error.act_output();
 #endif // _DEBUG
@@ -861,14 +911,14 @@ void TrimManager::act_resolveOne(TrimManager* tm_ptr, std::atomic<int64_t>* cloc
         catch (std::runtime_error exp)
         {
             error_flag = true;
-            std::cout << exp.what() << std::endl;
+            __atomic_print(exp.what());
         }
    
         if (!error_flag)
         {
             std::string root{ tm_ptr->m_outputRoot + std::to_string(patch_to_process / tm_ptr->m_patchCntPerFolder)
            + "/patch_" + std::to_string(patch_to_process) };
-            patch.act_opuput(static_cast<GenerateType>(tm_ptr->m_generateMode), root);
+            patch.act_output(static_cast<GenerateType>(tm_ptr->m_generateMode), root);
             act_atomicMax(tm_ptr->m_maxCurveOrder, patch.get_maxOrderOfCurve());
             tm_ptr->m_bezierNum.fetch_add(patch.get_bezier_cnt());
             int bz_num = tm_ptr->m_bezierNum;

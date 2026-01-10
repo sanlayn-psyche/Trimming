@@ -24,9 +24,10 @@ public:
     size_t get_spanIndex(double t, int dir) const;
 
 	void get_evaluate(vector<double> &domain_u, vector<double> &domain_v, vector<Point3D> &vertex, vector<TriIndex> &index) const;
+    void get_evaluate(vector<double>& domain_u, vector<double>& domain_v, vector<vector<Point3D>>& vertex) const;
     void get_evaluate(double u1, double u2, double v1, double v2, vector<Point3D>& vertex, vector<TriIndex>& index) const;
     void act_evalAll(double stepx, double stepy, vector<Point3D> &vertex, vector<TriIndex> &index) const;
-    void act_evalGrid(double stepx, double stepy, vector<vector<Point3D>>& vertex) const;
+    void act_evalAll(double stepx, double stepy, vector<vector<Point3D>>& vertex) const;
     void get_evalPoints(vector<Point> &line, vector<Point3D> &vertex) const;
 
     vector<double> get_1stFundForm(vector<double>& frame);
@@ -35,6 +36,7 @@ public:
     std::vector<float> get_bezierControlPoints(double u1, double u2, double v1, double v2);
    
     int get_bezier_cnt() const;
+    int get_data_size() const;
     Point3D get_partialDiv(double u, double v, int dir) const;
     Point3D get_secondOderDiv(double u, double v, int d1, int d2) const;
     double get_sizeOnSurf(ParallelBox<double>& para);

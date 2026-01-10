@@ -338,6 +338,11 @@ int Ellip::get_data_size()
     return 0;
 }
 
+int Ellip::get_bezier_cnt()
+{
+    return 0;
+}
+
 
 Point Ellip::get_divAt(double t, int divOrder, int dir) const
 {

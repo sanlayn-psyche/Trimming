@@ -52,6 +52,7 @@ public:
 private:
 
     vector<double> act_eval_cut(const Point& p0, const Point& orth, vector<Point>& intersects);
+    vector<double> act_eval_cut2(const Point& p0, const Point& orth);
     bool if_best(const vector<double>& value1);
     void act_trans_points_line(Point& p1, Point& p2);
     void act_update_edge(const vector<Point> &p, vector<Point>& c1, vector<Point>& c2);
@@ -59,8 +60,10 @@ private:
     void act_write_tree(vector<float>& tree);
     void act_write_leaf(vector<float>& tree, vector<float>& corse, vector<float>& fine);
 
- 
     vector<Point> m_candidates;
+    vector<Curve*>* m_curves_ptr{nullptr};
+    vector<SubCurve*>* m_subcurves_ptr{ nullptr };
+
     vector<SlabSet*> m_slabSets;
     vector<vector<MonoSubCurve*>> m_connected_curves;
 };

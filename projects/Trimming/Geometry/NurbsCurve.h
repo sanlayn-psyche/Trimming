@@ -23,6 +23,7 @@ public:
     void act_loadFromTxt(std::ifstream& fin) override;
 
     int get_data_size() override;
+    int get_bezier_cnt() override;
     Point get_divAt(double t, int divOrder = 1, int dir = 1) const override;
     Point get_evaluateAt(double t) const override;
     void act_findMonoPoints() override;

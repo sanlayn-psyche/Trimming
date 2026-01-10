@@ -8,6 +8,7 @@
 #include "TrimLoop.h"
 #include "Search.h"
 #include "Eval.h"
+#include "iostream"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -15,6 +16,154 @@
 #include "stb_image_write.h"
 #include "map"
 
+
+template<>
+struct Patch::OutputProxy<GenerateType::CurveList> : public Patch::OutputInterface
+{
+    void act_write_nurbs(NurbsCurve *nbs, double s, double t, vector<float> &curve, vector<float> &detail)
+    {
+        int order = nbs->m_order;
+
+        vector<Point> cv_new(order);
+        vector<double> w_new(order);
+        int p = (nbs->get_spanIndex((s + t) * 0.5) + 1) * (order - 1);
+        cv_new.assign(nbs->m_controlPoints.cbegin() + p + 1 - order, nbs->m_controlPoints.cbegin() + p + 1);
+        w_new.assign(nbs->m_weights.cbegin() + p + 1 - order, nbs->m_weights.cbegin() + p + 1);
+        __bloom_uniform(cv_new, w_new, nbs->m_knots, p - order + 1, order, s, t);
+
+        curve.push_back(static_cast<float>(cv_new[0][0]));
+        curve.push_back(static_cast<float>(cv_new[0][1]));
+        curve.push_back(static_cast<float>(w_new[0]));
+        curve.push_back(static_cast<float>(cv_new[order - 1][0]));
+        curve.push_back(static_cast<float>(cv_new[order - 1][1]));
+        curve.push_back(static_cast<float>(w_new[order - 1]));
+        curve.push_back(static_cast<float>(order));
+        curve.push_back(static_cast<float>(detail.size()));
+        for (int i = 0; i < order; i++)
+        {
+            detail.push_back(static_cast<float>(cv_new[i][0]));
+            detail.push_back(static_cast<float>(cv_new[i][1]));
+            detail.push_back(static_cast<float>(w_new[i]));
+        }
+    }
+
+
+    void act_output(const Patch& p, const string& root)
+    {
+        std::vector<std::ofstream> fouts(3);
+        vector<float> frame(4);
+        int size = 0;
+        int bzier_num = p.m_frames_cstyle.size();
+
+        fouts[0].open(root + "_summerize.bin", std::ios::binary);
+        fouts[1].open(root + "_trimming.bin", std::ios::binary);
+        fouts[2].open(root + "_geometry.bin", std::ios::binary);
+
+        int order[2] = { p.m_surface->m_order[0] - 1, p.m_surface->m_order[1] - 1 };
+        fouts[0].write((char*)&bzier_num, 4);
+        fouts[0].write((char*)order, 8);
+        fouts[0].write((char*)&p.m_surface->m_ifElementary, 4);
+        for (size_t i = 0; i < bzier_num; i++)
+        {
+            // geometry data
+            auto cvs_data = p.m_surface->get_bezierControlPoints(p.m_frames_cstyle[i][0], p.m_frames_cstyle[i][1], p.m_frames_cstyle[i][2], p.m_frames_cstyle[i][3]);
+            fouts[2].write((char*)cvs_data.data(), cvs_data.size() * 4);
+        }
+
+        int root_cnt = p.m_frames_cstyle.size();
+        fouts[0].write((char*)&root_cnt, 4);
+        for (size_t i = 0; i < p.m_frames_cstyle.size(); i++)
+        {
+            const auto& domain = p.m_frames_cstyle[i];
+            frame[0] = static_cast<float>(domain[0]);
+            frame[1] = static_cast<float>(domain[2]);
+            frame[2] = static_cast<float>(domain.get_size(0));
+            frame[3] = static_cast<float>(domain.get_size(1));
+            fouts[1].write((char*)frame.data(), 4 * 4);
+
+            if (i == p.m_frames_cstyle.size() - 1)
+            {
+                vector<float> tree, curve, curvedetail;
+                tree.push_back(static_cast<float>(p.m_loops.size()));
+                for (auto loop : p.m_loops)
+                {
+                    auto& f = loop->m_frame;
+                    for (int j = 0; j < 4; j++) tree.push_back(static_cast<float>(f[j]));
+                    tree.push_back(static_cast<float>(curve.size()));
+                    size_t cnurve_cnt = 0;
+                    for (auto cv : loop->m_curves)
+                    {
+                        auto nbs = static_cast<NurbsCurve*>(cv);
+                        std::vector<double> paras = nbs->m_monoParas;
+                        paras.insert(paras.end(), nbs->m_spans.begin(), nbs->m_spans.end());
+                        std::sort(paras.begin(), paras.end());
+                        __deDulplicate(paras);
+                        cnurve_cnt += (paras.size() - 1);
+                        for (size_t j = 0; j < paras.size() - 1; j++)
+                        {
+                            act_write_nurbs(nbs, paras[j], paras[j + 1], curve, curvedetail);
+                        }
+                    }
+                    tree.push_back(static_cast<float>(cnurve_cnt));
+                }
+                size = 0;
+                fouts[0].write((char*)&size, 4);
+
+                size = tree.size();
+                fouts[0].write((char*)&size, 4);
+
+                size = curve.size();
+                fouts[0].write((char*)&size, 4);
+
+                size = curvedetail.size();
+                fouts[0].write((char*)&size, 4);
+
+                fouts[1].write((char*)tree.data(), tree.size() * 4);
+                fouts[1].write((char*)curve.data(), curve.size() * 4);
+                fouts[1].write((char*)curvedetail.data(), curvedetail.size() * 4);
+            }
+            else
+            {
+                size = 0;
+                fouts[0].write((char*)&size, 4);
+
+                size = 0;
+                fouts[0].write((char*)&size, 4);
+
+                size = 0;
+                fouts[0].write((char*)&size, 4);
+
+                size = 0;
+                fouts[0].write((char*)&size, 4);
+            }
+        }
+
+        bzier_num = p.m_frames_notrim_cstyle.size();
+        fouts[0].write((char*)&bzier_num, 4);
+        for (size_t i = 0; i < bzier_num; i++)
+        {
+            // no trim patch
+            auto cvs_data = p.m_surface->get_bezierControlPoints(p.m_frames_notrim_cstyle[i][0], p.m_frames_notrim_cstyle[i][1], p.m_frames_notrim_cstyle[i][2], p.m_frames_notrim_cstyle[i][3]);
+            fouts[2].write((char*)cvs_data.data(), cvs_data.size() * 4);
+
+            const auto& domain = p.m_frames_notrim_cstyle[i];
+            frame[0] = static_cast<float>(domain[0]);
+            frame[1] = static_cast<float>(domain[2]);
+            frame[2] = static_cast<float>(domain.get_size(0));
+            frame[3] = static_cast<float>(domain.get_size(1));
+            fouts[1].write((char*)frame.data(), 4 * 4);
+        }
+        fouts[0].write((char*)&p.m_bezier_surf_cnt, 4);
+        fouts[0].write((char*)&p.m_bezier_surf_data, 4);
+        fouts[0].write((char*)&p.m_bezier_curve_cnt, 4);
+        fouts[0].write((char*)&p.m_bezier_curve_data, 4);
+
+        for (auto& fout : fouts)
+        {
+            fout.close();
+        }
+    }
+};
 
 
 template<>
@@ -90,7 +239,7 @@ struct Patch::OutputProxy<GenerateType::FacePerBezier> : public Patch::OutputInt
 
 
 template<>
-struct Patch::OutputProxy<GenerateType::FacePerNurbs> : public Patch::OutputInterface
+struct Patch::OutputProxy<GenerateType::FacePerNurbsIndex> : public Patch::OutputInterface
 {
     void act_output(const Patch& p, const string& root)
     { 
@@ -114,88 +263,36 @@ struct Patch::OutputProxy<GenerateType::FacePerNurbs> : public Patch::OutputInte
             p.m_surface->act_evalAll(su, sv, vtx, idx);
             ot::print(vtx, root + "_vertex.txt", "\n");
             ot::print(idx, root + "_index.txt", "\n");
-
-            //int cnt_cv = 0;
-            //for (auto loop : m_loops)
-            //{
-            //    for (auto cv : loop->m_curves)
-            //    {
-            //        for (size_t i = 1; i < cv->m_curve->m_monoParas.size(); i++)
-            //        {
-            //            vector<Point3D> res3;
-            //            vector<Point3D> parabox_on_surf;
-            //            auto res = cv->m_curve->get_evaluate(cv->m_curve->m_monoParas[i - 1], cv->m_curve->m_monoParas[i]);
-            //            m_surface->get_evalPoints(res, res3);
-            //            auto parabox = cv->get_paraBox(cv->m_curve->m_monoParas[i - 1], cv->m_curve->m_monoParas[i]);
-            //            auto para_edge = parabox.get_outline();
-            //            para_edge.push_back(para_edge.front());
-
-            //            for (size_t j = 1; j < para_edge.size(); j++)
-            //            {
-            //                int samplenum = std::max((para_edge[j] - para_edge[j - 1]).get_norm() / 0.01, 2.0);
-            //                for (size_t k = 0; k <= samplenum; k++)
-            //                {
-            //                    Point ppp = (k / double(samplenum)) * para_edge[j] + ((samplenum - k) / double(samplenum)) * para_edge[j - 1];
-            //                    parabox_on_surf.push_back(m_surface->get_evaluateAt(ppp[0], ppp[1]));
-            //                }
-            //            }
-
-            //            if (cnt_cv == 2)
-            //            {
-            //                vector<Point> uniformPoint{res.back()};
-            //                double spr = 2.0;
-            //                auto step = abs((res.back() - res.front())[0]) / spr;
-            //                double pos = std::min(res.back()[0], res.front()[0]);
-            //                double para1 = cv->m_curve->m_monoParas[i];
-            //                double para2 = 0;
-            //                bool ifinc = (res.back() - res.front())[0] > 0.0;
-            //                for (size_t k = 0; k < int(spr); k++)
-            //                {
-            //                    pos += step;
-            //                    //pos = std::min(std::max(res.back()[0], res.front()[0]), pos);
-            //                    Point p{ pos };
-            //                    double mid = cv->m_curve->get_aaIterate(ifinc, 0, p, cv->m_curve->m_monoParas[i - 1], cv->m_curve->m_monoParas[i]);
-            //                    uniformPoint.push_back(p);
-            //                    para2 = mid;
-            //                    vector<Point3D> uniparabox_on_surf;
-            //                    auto uniparabox = cv->get_paraBox(para2, para1);
-            //                    auto unipara_edge = uniparabox.get_outline();
-            //                    unipara_edge.push_back(unipara_edge.front());
-            //                    for (size_t s = 1; s < unipara_edge.size(); s++)
-            //                    {
-            //                        int samplenum = std::max((unipara_edge[s] - unipara_edge[s - 1]).get_norm() / 0.01, 2.0);
-            //                        for (size_t ii = 0; ii <= samplenum; ii++)
-            //                        {
-            //                            Point ppp = (ii / double(samplenum)) * unipara_edge[s] + ((samplenum - ii) / double(samplenum)) * unipara_edge[s - 1];
-            //                            uniparabox_on_surf.push_back(m_surface->get_evaluateAt(ppp[0], ppp[1]));
-            //                        }
-            //                    }
-            //                    ot::print(unipara_edge, root + "_uniform_" + std::to_string(k) + "_pb.txt", "\n");
-            //                    ot::print(uniparabox_on_surf, root + "_uniform_" + std::to_string(k) + "_pb_onsurf.txt", "\n");
-            //                    para1 = mid;
-            //                }
-            //                uniformPoint.back() = res.front();
-            //                ot::print(uniformPoint, root + "_uniform_point.txt", "\n");
-            //                vector<Point3D> unipoint_on_surf;
-            //                for (auto p : uniformPoint)
-            //                {
-            //                    unipoint_on_surf.push_back(m_surface->get_evaluateAt(p[0], p[1]));
-            //                }
-            //                ot::print(unipoint_on_surf, root + "_uniform_point_on_surf.txt", "\n");
-
-            //            }
-
-            //            ot::print(para_edge, root + "_trim_" + std::to_string(cnt_cv) + "_pb.txt", "\n");
-            //            ot::print(parabox_on_surf, root + "_trim_" + std::to_string(cnt_cv) + "_pb_onsurf.txt", "\n");
-            //            ot::print(res3, root + "_trim_" + std::to_string(cnt_cv) + "_3d.txt", "\n");
-            //            ot::print(res, root + "_trim_" + std::to_string(cnt_cv++) + "_2d.txt", "\n");
-            //        }
-
-            //    }
-            //}
         }
+    };
+};
 
-    
+
+template<>
+struct Patch::OutputProxy<GenerateType::FacePerNurbsMatrix> : public Patch::OutputInterface
+{
+    void act_output(const Patch& p, const string& root)
+    {
+        if (p.m_surface != nullptr)
+        {
+            auto u = __get_linspace(p.m_surface->m_spans[0].front(), p.m_surface->m_spans[0].back(), 1000);
+            auto v = __get_linspace(p.m_surface->m_spans[1].front(), p.m_surface->m_spans[1].back(), 1000);
+            vector<vector<Point3D>> vtx;
+            p.m_surface->get_evaluate(u, v, vtx);
+            for (size_t k = 0; k < 3; k++)
+            {
+                std::ofstream ofs(root + "_vertex_" + std::to_string(k) + ".txt");
+                for (auto& i : vtx)
+                {
+                    for (auto& j : i)
+                    {
+                        ofs << j[k] << " ";
+                    }
+                    ofs << std::endl;
+                }
+                ofs.close();
+            }
+        }
     };
 };
 
@@ -246,9 +343,10 @@ struct Patch::OutputProxy<GenerateType::Image> : public Patch::OutputInterface
 {
     void act_output(const Patch& p, const string& root)
     {
+        size_t width = 1024, height = 1024;
         if (p.m_roots.size() > 0)
         {
-            unsigned char* data = (unsigned char*)malloc(500 * 500);
+            unsigned char* data = (unsigned char*)malloc(width * height);
             double dist;
 
             double w, h, x0, y0;
@@ -256,74 +354,343 @@ struct Patch::OutputProxy<GenerateType::Image> : public Patch::OutputInterface
             h = p.m_frame.get_size(1);
             x0 = p.m_frame[0];
             y0 = p.m_frame[2];
+            w = p.m_loops[0]->m_frame.get_size(0);
+            h = p.m_loops[0]->m_frame.get_size(1);
+            x0 = p.m_loops[0]->m_frame[0];
+            y0 = p.m_loops[0]->m_frame[2];
+  
             float pos[2];
-            for (size_t i = 0; i < 500; i++)
+            for (size_t i = 0; i < width; i++)
             {
-                for (size_t j = 0; j < 500; j++)
+                for (size_t j = 0; j < height; j++)
                 {
-                    pos[0] = (float(i) / 500.0) * w + x0;
-                    pos[1] = (float(j) / 500.0) * h + y0;
+                    pos[0] = (float(i) / width) * w + x0;
+                    pos[1] = (float(j) / height) * h + y0;
+                    //dist = p.get_searchtime_cstyle(pos);
                     dist = p.get_coverage_cstyle(pos);
+                    //dist = p.get_coverage(pos[0], pos[1]);
+                    //data[j * width + i] = static_cast<int>(dist);// 255.0 < dist ? 255 : 255 - static_cast<int>(dist);
                     if (dist > 0)
                     {
-                        data[i * 500 + j] = 0;
+                        data[j * width + i] = 0;
                     }
                     else
                     {
-                        data[i * 500 + j] = 255;
+                        data[j * width + i] = 255;
                     }
                 }
             }
+       
+            
             string path = root + "_trimming.jpg";
-            stbi_write_jpg(path.c_str(), 500, 500, 1, data, 0);
+            stbi_write_jpg(path.c_str(), width, height, 1, data, 0);
         }
+    }
+};
+
+template<>
+struct Patch::OutputProxy<GenerateType::Cut> : public Patch::OutputInterface
+{
+    void act_output(const Patch& p, const string& root)
+    {
+        int edge_cnt{ 0 };
+        for (auto leaf : p.m_leaf_nodes)
+        {
+            if (leaf->m_type != NodeType::INVALID && leaf->m_type != NodeType::CULLING)
+            {
+                const auto& edge = leaf->m_curveSetPtr.leaf->m_edge;
+                if (edge.size() > 0)
+                {
+                    std::ofstream ofs(root + "edge_" + std::to_string(edge_cnt++) + ".txt");
+                    for (size_t i = 0; i < edge.size(); i++)
+                    {
+                        ofs << edge[i] << std::endl;
+                    }
+                    ofs << edge[0];
+                    ofs.close();
+                }
+            }
+        }
+
+        const auto& edge = p.m_roots[0]->m_curveSetPtr.node->m_edge;
+        if (edge.size() > 0)
+        {
+            std::ofstream ofs(root + "frameedge.txt");
+            for (size_t i = 0; i < edge.size(); i++)
+            {
+                ofs << edge[i] << std::endl;
+            }
+            ofs << edge[0];
+            ofs.close();
+        }
+
+    /*    const auto& frame = p.m_frame;
+        {
+            std::ofstream ofs(root + "frameedge.txt");
+            ofs << frame[0] << " " << frame[2] << std::endl;
+            ofs << frame[1] << " " << frame[2] << std::endl;
+            ofs << frame[1] << " " << frame[3] << std::endl;
+            ofs << frame[0] << " " << frame[3] << std::endl;
+            ofs << frame[0] << " " << frame[2] << std::endl;
+            ofs.close();
+        }
+     */
+        
+
+        int cv_cnt{ 0 };
+        for (auto loop: p.m_loops)
+        {
+            for (auto cv : loop->m_curves)
+            {   
+        /*        auto cvp = cv->get_evaluateAll();
+                ot::print(cvp, root + "curve_" + std::to_string(cv_cnt++) + ".txt", "\n");*/
+                for (size_t i = 0; i < cv->m_spans.size() - 1; i++)
+                {
+                    auto cvp = cv->get_evaluate(cv->m_spans[i], cv->m_spans[i + 1]);
+                    ot::print(cvp, root + "curve_" + std::to_string(cv_cnt++) + ".txt", "\n");
+                }
+            }
+        }
+        std::ofstream ofs(root + "edge_curve_cnt.txt");
+        ofs << edge_cnt << " " << cv_cnt;
+        ofs.close();
+
     }
 };
 
 
 
 template<>
-struct Patch::OutputProxy<GenerateType::Texture> : public Patch::OutputInterface
+struct Patch::OutputProxy<GenerateType::TextureBin> : public Patch::OutputInterface
 {
-    void act_output(const Patch& p, const string& root)
+    vector<unsigned> get_texture(const Patch& p, const Frame &frame)
     {
-        std::ofstream fout(root + "_trim_texture.bin", std::ios::binary);
-        int W = 1000;
-        int H = 1000;
-        unsigned char* data = (unsigned char*)malloc(W * H);
-        if (p.m_roots.size() > 0)
-        {
-            double dist;
-            double w, h, x0, y0;
-            w = p.m_frame.get_size(0);
-            h = p.m_frame.get_size(1);
-            x0 = p.m_frame[0];
-            y0 = p.m_frame[2];
-            float pos[2];
-            for (size_t i = 0; i < W; i++)
-            {
-                for (size_t j = 0; j < H; j++)
-                {
-                    pos[0] = (float(i) / W) * w + x0;
-                    pos[1] = (float(j) / H) * h + y0;
-                    dist = p.get_coverage_cstyle(pos);
-                    if (dist >= 0)
-                    {
-                        data[i * W + j] = 0;
-                    }
-                    else
-                    {
-                        data[i * W + j] = 255;
-                    }
+        int tW = 256;
+        int tH = 128;
 
+        int iW = 4;
+        int iH = 8;
+
+        vector<unsigned> tex(tW * tH, 0xFFFFFFFF);
+        double w, h, x0, y0;
+        w = frame.get_size(0);
+        h = frame.get_size(1);
+        x0 = frame[0];
+        y0 = frame[2];
+        float pos[2];
+        for (size_t i = 0; i < tW; i++)
+        {
+            for (size_t j = 0; j < tH; j++)
+            {
+                auto& elem_tex = tex[j * tW + i];
+                    
+                for (size_t s = 0; s < iW; s++)
+                {
+                    for (size_t k = 0; k < iH; k++)
+                    {
+                        pos[0] = (double(i * iW + s) / 1024.0) * w + x0;
+                        pos[1] = (double(j * iH + k) / 1024.0) * h + y0;
+
+                        auto dist = p.get_coverage(pos[0], pos[1]);
+
+                        if (dist < 0.0f)
+                        {
+                            auto x = ~(0b1 << (k * iW + s));
+                            elem_tex &= ~(0b1 << (k * iW + s));
+                        }
+                    }
                 }
             }
         }
-        fout.write((char*)data, W * H);
+        return tex;
+    }
+
+    void act_output(const Patch& p, const string& root)
+    {
+        std::vector<std::ofstream> fouts(3);
+        vector<float> frame(4);
+        int size = 0;
+        int bzier_num = p.m_frames_cstyle.size();
+
+        fouts[0].open(root + "_summerize.bin", std::ios::binary);
+        fouts[1].open(root + "_trimming.bin", std::ios::binary);
+        fouts[2].open(root + "_geometry.bin", std::ios::binary);
+
+        int order[2] = { p.m_surface->m_order[0] - 1, p.m_surface->m_order[1] - 1 };
+        fouts[0].write((char*)&bzier_num, 4);
+        fouts[0].write((char*)order, 8);
+        fouts[0].write((char*)&p.m_surface->m_ifElementary, 4);
+        for (size_t i = 0; i < bzier_num; i++)
+        {
+            // geometry data
+            auto cvs_data = p.m_surface->get_bezierControlPoints(p.m_frames_cstyle[i][0], p.m_frames_cstyle[i][1], p.m_frames_cstyle[i][2], p.m_frames_cstyle[i][3]);
+            fouts[2].write((char*)cvs_data.data(), cvs_data.size() * 4);
+        }
+
+        int root_cnt = p.m_frames_cstyle.size();
+        fouts[0].write((char*)&root_cnt, 4);
+        for (size_t i = 0; i < p.m_frames_cstyle.size(); i++)
+        {
+            const auto& domain = p.m_frames_cstyle[i];
+            frame[0] = static_cast<float>(domain[0]);
+            frame[1] = static_cast<float>(domain[2]);
+            frame[2] = static_cast<float>(domain.get_size(0));
+            frame[3] = static_cast<float>(domain.get_size(1));
+            fouts[1].write((char*)frame.data(), 4 * 4);
+
+            size = p.m_roots_cstyle[i].size();
+            fouts[0].write((char*)&size, 4);
+
+            size = 256 * 128 + 4;// p.m_tree_cstyle[i].size();
+            fouts[0].write((char*)&size, 4);
+
+            size = 0;// p.m_corseSample_cstyle[i].size();
+            fouts[0].write((char*)&size, 4);
+
+            size = 0;// p.m_curveDetail_cstyle[i].size();
+            fouts[0].write((char*)&size, 4);
+
+            frame[0] = static_cast<float>(1024.0 / (domain.get_size(0)));
+            frame[1] = static_cast<float>(-domain[0] * 1024.0 / (domain.get_size(0)));
+            frame[2] = static_cast<float>(1024.0 / (domain.get_size(1)));
+            frame[3] = static_cast<float>(-domain[2] * 1024.0 / (domain.get_size(1)));
+            fouts[1].write((char*)frame.data(), 4 * 4);
+
+            auto tex = get_texture(p, domain);  
+            fouts[1].write((char*)tex.data(), tex.size() * 4);
+        }
+
+        bzier_num = p.m_frames_notrim_cstyle.size();
+        fouts[0].write((char*)&bzier_num, 4);
+        for (size_t i = 0; i < bzier_num; i++)
+        {
+            // no trim patch
+            auto cvs_data = p.m_surface->get_bezierControlPoints(p.m_frames_notrim_cstyle[i][0], p.m_frames_notrim_cstyle[i][1], p.m_frames_notrim_cstyle[i][2], p.m_frames_notrim_cstyle[i][3]);
+            fouts[2].write((char*)cvs_data.data(), cvs_data.size() * 4);
+
+            const auto& domain = p.m_frames_notrim_cstyle[i];
+            frame[0] = static_cast<float>(domain[0]);
+            frame[1] = static_cast<float>(domain[2]);
+            frame[2] = static_cast<float>(domain.get_size(0));
+            frame[3] = static_cast<float>(domain.get_size(1));
+            fouts[1].write((char*)frame.data(), 4 * 4);
+        }
+        fouts[0].write((char*)&p.m_bezier_surf_cnt, 4);
+        fouts[0].write((char*)&p.m_bezier_surf_data, 4);
+        fouts[0].write((char*)&p.m_bezier_curve_cnt, 4);
+        fouts[0].write((char*)&p.m_bezier_curve_data, 4);
+
+        for (auto& fout : fouts)
+        {
+            fout.close();
+        }
+    }
+};
+
+
+template<>
+struct Patch::OutputProxy<GenerateType::TextureTxt> : public Patch::OutputInterface
+{
+    void act_output(const Patch& p, const string& root)
+    {
+        std::ofstream fout(root + "_trim_texture.txt");
+        int W = 1000;
+        int H = 1000;
+        auto u = __get_linspace(static_cast<float>(p.m_frame[0]), static_cast<float>(p.m_frame[1]), W);
+        auto v = __get_linspace(static_cast<float>(p.m_frame[2]), static_cast<float>(p.m_frame[3]), H);
+        if (p.m_roots.size() > 0)
+        {
+            for (auto i : u)
+            {
+                for (auto j : v)
+                {
+                    float pos[2] = {i,j};
+                    float dist = p.get_coverage_cstyle(pos);
+                    if (dist > -FLOAT_ZERO_GEOMETRY_COMPARE)
+                    {
+                        fout << 0.3f << " ";
+                    }
+                    else
+                    {
+                        fout << -0.3f << " ";
+                    }
+                 
+                }
+                fout << std::endl;
+            }
+        }
         fout.close();
     }
 };
 
+template<>
+struct Patch::OutputProxy<GenerateType::Sample> : public Patch::OutputInterface
+{
+    void act_output(const Patch& p, const string& root)
+    {
+
+        int cv_cnt{ 0 };
+        double w = p.m_frame.get_size(0) / 100.0;
+        double h = p.m_frame.get_size(1) / 100.0;
+
+        
+
+        for (auto leaf : p.m_leaf_nodes)
+        {
+            auto eval_delegate = dynamic_cast<EvalDelegate_ls*>(leaf->m_curveSetPtr.leaf->m_search->m_eval);
+            vector<float> corse, fine;
+            eval_delegate->act_write(corse, fine);
+            for (size_t i = 0; i < eval_delegate->m_curves.size(); i++, cv_cnt++)
+            {
+                auto cvp = eval_delegate->m_curves[i]->get_evaluate();
+                ot::print(cvp, root + "curve_" + std::to_string(cv_cnt) + ".txt", "\n");
+                std::ofstream ofs(root + "finesample_" + std::to_string(cv_cnt) + ".txt");
+
+                auto draw_fine = [&ofs, &w, &h](Point &p, int fdir)
+                    {
+                        Point temp = p;
+                        if (fdir == 0)
+                        {
+                            temp[0] -= 0.5 * w;
+                        }
+                        else
+                        {
+                            temp[1] -= 0.5 * h;
+                        }
+                        ofs << temp[0] << " " << temp[1] << std::endl;
+                        if (fdir == 0)
+                        {
+                            temp[0] += w;
+                        }
+                        else
+                        {
+                            temp[1] += h;
+                        }
+                        ofs << temp[0] << " " << temp[1] << std::endl;
+                    };
+
+                if (eval_delegate->m_sampleRate[i] > 1 || eval_delegate->m_sampleRate[i] < -1)
+                {
+                    Point ite{ corse[4 * i], corse[4 * i + 1] };
+                    auto fdir = eval_delegate->m_fineSampleDir[i];
+                    double delta = (corse[4 * i + 2 + fdir] - corse[4 * i + fdir]) / abs(eval_delegate->m_sampleRate[i]);
+                    
+                    auto offset = (int*)(& corse[4 * eval_delegate->m_curves.size() + i]);
+
+                    for (size_t j = 0; j < abs(eval_delegate->m_sampleRate[i]) - 1; j++)
+                    {
+                        ite[fdir] += delta;
+                        ite[1 - fdir] = fine[1 + j + abs(*offset) - 2];
+                        draw_fine(ite, fdir);
+                    }
+                }
+                ofs.close();
+            }
+        }
+     
+
+    }
+};
 
 template<>
 struct Patch::OutputProxy<GenerateType::RenderDataBin> : public Patch::OutputInterface
@@ -390,6 +757,10 @@ struct Patch::OutputProxy<GenerateType::RenderDataBin> : public Patch::OutputInt
             frame[3] = static_cast<float>(domain.get_size(1));
             fouts[1].write((char*)frame.data(), 4 * 4);
         }
+        fouts[0].write((char*)&p.m_bezier_surf_cnt, 4);
+        fouts[0].write((char*)&p.m_bezier_surf_data, 4);
+        fouts[0].write((char*)&p.m_bezier_curve_cnt, 4);
+        fouts[0].write((char*)&p.m_bezier_curve_data, 4);
 
         for (auto& fout : fouts)
         {
@@ -449,10 +820,17 @@ void Patch::set_property(const PatchProperty& prop)
 
 void Patch::init_load(std::ifstream& fin, size_t offset)
 {
+    m_bezier_curve_cnt = 0;
+    m_bezier_surf_cnt = 0;
+    m_bezier_curve_data = 0;
+    m_bezier_surf_data = 0;
     fin.seekg(offset, std::ios_base::beg);
     try
     {
         init_loadSurface(fin);
+        m_bezier_surf_data = m_surface->get_data_size();
+        m_bezier_surf_cnt = m_surface->get_bezier_cnt();
+
         int loopcount = 0;
         if (m_properties->m_load_mode == 1)
         {
@@ -466,6 +844,7 @@ void Patch::init_load(std::ifstream& fin, size_t offset)
         {
             init_addLoop(fin);
         }
+     
         if (loopcount == 0)
         {
             m_loops.push_back(new TrimLoop());
@@ -475,6 +854,11 @@ void Patch::init_load(std::ifstream& fin, size_t offset)
             m_loops[0]->m_frame = m_surface->m_domainFrame;
         }
         
+        for (size_t i = 0; i < m_loops.size(); i++)
+        {
+            m_bezier_curve_data += m_loops[i]->get_data_size();
+            m_bezier_curve_cnt += m_loops[i]->get_bezier_cnt();
+        }
 
         m_frame.act_union(m_surface->m_domainFrame);
         double size = m_frame.get_size(0) / 20.0;
@@ -560,6 +944,18 @@ void Patch::init_generate()
 
 void Patch::act_generate_data()
 {
+    if (m_properties->m_tree_only == 1)
+    {
+        return;
+    }
+    
+    //auto cnt = (m_surface->m_spans[0].size() - 1) * (m_surface->m_spans[1].size() - 1);
+    //
+    //if (m_roots.size() - cnt > 0 && m_roots.size() < cnt + 5)
+    //{
+    //    std::cout << "NURBS ID: " << m_properties->m_id << ", excess cnt " << m_roots.size() - cnt << std::endl;
+    //}
+
     for (auto ite_root : m_roots)
     {
         vector<int> offset_table;
@@ -587,6 +983,10 @@ void Patch::act_generate_data()
         }
     }
 
+    //m_output_proxy.get(GenerateType::Cut)->act_output(*this, "D:/Users/sanlayn/Source/Repos/data/surf/");
+    //m_output_proxy.get(GenerateType::FacePerNurbsMatrix)->act_output(*this, "D:/Users/sanlayn/Source/Repos/data/surf/surf_" + std::to_string(m_properties->m_id));
+    //m_output_proxy.get(GenerateType::TextureTxt)->act_output(*this, "D:/Users/sanlayn/Source/Repos/data/surf/tex_" + std::to_string(m_properties->m_id));
+    
 }
 
 void Patch::get_pixel_cord(const int w, const int h, double& u, double& v)
@@ -674,8 +1074,10 @@ void Patch::act_scan(int& corase_real, int& fine_real, int& corase_abs, int& fin
 void Patch::act_postprocess()
 {
     m_properties->m_search_ptr->act_collect_nodes(m_roots, m_nodes, m_leaf_nodes);
-    //throw lf_exception_node(m_roots[0]->m_child[7]);
-    //act_leafRefine(*m_roots[0]->m_child[6]);
+    if (m_properties->m_tree_only == 1)
+    {
+        return;
+    }
     for (auto lf : m_leaf_nodes)
     {
         act_leafRefine(*lf);
@@ -1469,22 +1871,74 @@ float Patch::get_coverage(float x, float y) const
 {
     float cord[2] = { x, y };
     // to check
-    auto ite = m_roots[0];
-
-    float minCoverage, coverage;
-    double dist;
-
-    if (!m_surface->m_domainFrame.if_containPoint(x, y))
+    int cnt = 0;
+    for (auto loop: m_loops)
     {
-        return -1;
+        cnt += loop->get_oddEvenTest(x, y);
     }
+    return cnt % 2 == 0 ? -1.0f : 1.0f;
+ 
 
-    while (ite->m_child.size() > 0)
-    {
-        int idx = ite->m_cutInfo->get_side(x, y);
-        ite = ite->m_child[idx];
-    }
-    return 0;
+    //if (!m_surface->m_domainFrame.if_containPoint(x, y))
+    //{
+    //    return -1;
+    //}
+    //for (size_t i = 0; i < m_roots.size(); i++)
+    //{
+    //    if (m_roots[i]->m_curveSetPtr.set->m_frame.if_containPoint(x, y))
+    //    {
+    //        auto ite = m_roots[i];
+    //        while (ite->m_child.size() > 0)
+    //        {
+    //            int idx = ite->m_cutInfo->get_side(x, y);
+    //            ite = ite->m_child[idx];
+    //        }
+    //        auto cvs_ptr = ite->m_curveSetPtr.leaf;
+    //        if (cvs_ptr != nullptr)
+    //        {
+    //            if (cvs_ptr->if_empty())
+    //            {
+    //                return static_cast<float>(cvs_ptr->m_search->m_odt[0]);
+    //            }
+    //            else
+    //            {
+    //                auto search_ptr = dynamic_cast<SearchDelegateLeaf_KD*>(cvs_ptr->m_search);
+    //                size_t i = 0;
+    //                while (i < search_ptr->m_vslab.size() - 1 && y >= search_ptr->m_vslab[i + 1])
+    //                {
+    //                    i++;
+    //                }
+    //                if (i >= search_ptr->m_vslab.size() - 1)
+    //                {
+    //                    i = search_ptr->m_vslab.size() - 2;
+    //                }
+    //                float dist = search_ptr->m_odt[i];
+    //                for (auto cv : dynamic_cast<EvalDelegate_bineval*>(search_ptr->m_eval)->m_curves)
+    //                {
+    //                    if (cv->m_frame[2] <= y && y < cv->m_frame[3])
+    //                    {
+    //                        if (x <= cv->m_frame[0])
+    //                        {
+    //                            dist *= -1.0f;
+    //                        }
+    //                        else if (x < cv->m_frame[1])
+    //                        {
+    //                            Point temp{ y };
+    //                            cv->get_aaIntersects(1, temp);
+    //                            if (x + FLOAT_ZERO_GEOMETRY_COMPARE < temp[0])
+    //                            {
+    //                                dist *= -1.0f;
+    //                            }
+    //                        }
+
+    //                    }
+    //                }
+    //                return dist;
+    //            }
+    //        }
+    //    }
+    //}
+    //return -1.0f;
 }
 
 float Patch::get_coverage_cstyle(float loc_dom[2]) const
@@ -1531,6 +1985,51 @@ float Patch::get_coverage_cstyle(float loc_dom[2]) const
    return dist;
 }
 
+int Patch::get_searchtime_cstyle(float loc_dom[2]) const
+{
+    if (!m_surface->m_domainFrame.if_containPoint(loc_dom[0], loc_dom[1]))
+    {
+        return 0;
+    }
+    float* corses = nullptr;
+    float* details = nullptr;
+    float dist = -1.0;
+
+    for (int i = m_frames_notrim_cstyle.size() - 1; i >= 0; i--)
+    {
+        if (m_frames_notrim_cstyle[i].if_containPoint(loc_dom[0], loc_dom[1]))
+        {
+            return 0;
+        }
+    }
+
+    int searchtime = 0;
+
+    for (int i = m_frames_cstyle.size() - 1; i >= 0; i--)
+    {
+        if (m_frames_cstyle[i].if_containPoint(loc_dom[0], loc_dom[1]))
+        {
+            int pos = 0;
+            if (m_properties->m_search_ptr->m_type == SearchType::GridBSP)
+            {
+                int loc[2];
+                float du = 7.0 / m_frames_cstyle[i].get_size(0), dv = 7.0 / m_frames_cstyle[i].get_size(1);
+                loc[0] = (loc_dom[0] - m_frames_cstyle[i][0]) * du;
+                loc[1] = (loc_dom[1] - m_frames_cstyle[i][2]) * dv;
+
+                if (loc[0] >= 0 && loc[0] <= 6 && loc[1] >= 0 && loc[1] <= 6)
+                {
+                    pos = (loc[0] + 7 * loc[1]);
+                }
+            }
+            searchtime += m_properties->m_search_ptr->get_searchtime(m_roots_cstyle[i].data() + pos, m_tree_cstyle[i].data(), m_corseSample_cstyle[i].data(), m_curveDetail_cstyle[i].data(), loc_dom[0], loc_dom[1], m_properties->m_eval_ptr.get());
+            break;
+        }
+    }
+
+    return searchtime;
+}
+
 void Patch::act_leafRefine(SpaceNode& spn)
 {
     if (spn.m_type == NodeType::LEAF)
@@ -1557,7 +2056,7 @@ void Patch::act_leafRefine(SpaceNode& spn)
     }
     else if (spn.m_type != NodeType::CULLING)
     {
-        throw lf_exception_undefined("Unexcepted node type!");
+        throw lf_exception_undefined("unexcepted node type!");
     }
 }
 
@@ -1594,11 +2093,12 @@ void Patch::get_depth(int& max, double& cov, double& mean) const
 
     for (auto lf : m_leaf_nodes)
     {
-        deep.push_back(lf->m_depth_tree);
-        sum += lf->m_depth_tree;
-        if (lf->m_depth_tree > max)
+        int depth = lf->m_depth_tree + lf->m_depth_forest * 2;
+        deep.push_back(depth);
+        sum += depth;
+        if (depth > max)
         {
-            max = lf->m_depth_tree;
+            max = depth;
         }
     }
 
@@ -1666,7 +2166,7 @@ void Patch::act_outputImageFixedUV(const std::string& root, const vector<Point>&
     stbi_write_jpg(path.c_str(), W, H, 1, data, 0);
 }
 
-void Patch::act_opuput(GenerateType type, const string& root)
+void Patch::act_output(GenerateType type, const string& root)
 {
     m_output_proxy.get(type)->act_output(*this, root);
 }
