@@ -81,7 +81,7 @@ inline T* Curve::get_newSubCurve(double s, double t)
 	return new T(s, t, *this);
 }
 
-class OCCT_DELEGATE_CURVE;
+class OCCTDelegate_CURVE;
 
 class Ellip : public Curve
 {
@@ -125,7 +125,7 @@ public:
 	vector<Point> m_axis;
 	vector<Point> m_endPoints;
 
-	OCCT_DELEGATE_CURVE* m_delegate{ nullptr };
+	OCCTDelegate_CURVE* m_delegate{ nullptr };
 	
 	bool m_ifwritted{ false };
 	int m_writeOffset{ 0 };

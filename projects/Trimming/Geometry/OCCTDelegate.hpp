@@ -15,12 +15,12 @@
 #include "NurbsSurface.h"
 #include "NurbsCurve.h"
 
-class OCCT_DELEGATE_CURVE
+class OCCTDelegate_CURVE
 {
 public:
-	OCCT_DELEGATE_CURVE(NurbsCurve* nbs);
-	OCCT_DELEGATE_CURVE(Ellip* ellipse);
-	~OCCT_DELEGATE_CURVE();
+	OCCTDelegate_CURVE(NurbsCurve* nbs);
+	OCCTDelegate_CURVE(Ellip* ellipse);
+	~OCCTDelegate_CURVE();
 
 	vector<Point> get_eval(double s, double t, double step = 0.01);
 	Point get_evalAt(double t, int order = 0);

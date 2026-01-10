@@ -8,7 +8,7 @@
 #include <Geom2dAPI_ProjectPointOnCurve.hxx>
 #include <IntRes2d_Intersection.hxx>
 
-OCCT_DELEGATE_CURVE::OCCT_DELEGATE_CURVE(NurbsCurve *nbs) {
+OCCTDelegate_CURVE::OCCTDelegate_CURVE(NurbsCurve *nbs) {
   TColgp_Array1OfPnt2d points(1, nbs->m_controlPoints.size());
   TColStd_Array1OfReal weights(1, nbs->m_controlPoints.size());
   TColStd_Array1OfReal knots(1, nbs->m_spans.size());
@@ -38,16 +38,16 @@ OCCT_DELEGATE_CURVE::OCCT_DELEGATE_CURVE(NurbsCurve *nbs) {
                               static_cast<Standard_Integer>(nbs->m_order - 1));
 }
 
-OCCT_DELEGATE_CURVE::OCCT_DELEGATE_CURVE(Ellip *ellipse) {
+OCCTDelegate_CURVE::OCCTDelegate_CURVE(Ellip *ellipse) {
   gp_Pnt2d center(ellipse->m_center[0], ellipse->m_center[1]);
   gp_Dir2d dir(ellipse->m_axis[0][0], ellipse->m_axis[0][1]);
   gp_Ax22d axis(center, dir, ellipse->m_aitiClockWise);
   m_this = new Geom2d_Ellipse(axis, ellipse->m_radius[0], ellipse->m_radius[1]);
 }
 
-OCCT_DELEGATE_CURVE::~OCCT_DELEGATE_CURVE() = default;
+OCCTDelegate_CURVE::~OCCTDelegate_CURVE() = default;
 
-vector<Point> OCCT_DELEGATE_CURVE::get_eval(double s, double t, double step) {
+vector<Point> OCCTDelegate_CURVE::get_eval(double s, double t, double step) {
   vector<Point> res;
   gp_Pnt2d pnt;
   for (double x = s; x < t; x + step) {
@@ -57,7 +57,7 @@ vector<Point> OCCT_DELEGATE_CURVE::get_eval(double s, double t, double step) {
   return res;
 }
 
-Point OCCT_DELEGATE_CURVE::get_evalAt(double t, int order) {
+Point OCCTDelegate_CURVE::get_evalAt(double t, int order) {
   if (order >= 1) {
     auto pp = m_this->DN(t, order);
     return Point{pp.X(), pp.Y()};
@@ -69,7 +69,7 @@ Point OCCT_DELEGATE_CURVE::get_evalAt(double t, int order) {
   }
 }
 
-void OCCT_DELEGATE_CURVE::get_intesectsWithLine(const Point &p1,
+void OCCTDelegate_CURVE::get_intesectsWithLine(const Point &p1,
                                                 const Point &dir,
                                                 vector<Point> &interps) {
   gp_Pnt2d gp1(p1.get_cord(0), p1.get_cord(1));
@@ -99,7 +99,7 @@ void OCCT_DELEGATE_CURVE::get_intesectsWithLine(const Point &p1,
   // }
 }
 
-bool OCCT_DELEGATE_CURVE::get_pointProjecionOnCurve(const Point &interp,
+bool OCCTDelegate_CURVE::get_pointProjecionOnCurve(const Point &interp,
                                                     double &proj,
                                                     const double s,
                                                     const double t) {
@@ -116,7 +116,7 @@ bool OCCT_DELEGATE_CURVE::get_pointProjecionOnCurve(const Point &interp,
   return false;
 }
 
-vector<double> OCCT_DELEGATE_CURVE::get_extrem(Frame &conserve_frame) {
+vector<double> OCCTDelegate_CURVE::get_extrem(Frame &conserve_frame) {
   vector<double> paras;
   gp_Pnt2d gp1(conserve_frame[0], conserve_frame[2] - 1);
   gp_Dir2d dir1(1, 0);

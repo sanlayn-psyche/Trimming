@@ -38,13 +38,12 @@ void GetClock(int64_t& clock)
     clock = value.count();
 }
 
-
 TrimManager::TrimManager()
 {
     init_debug();
 
     m_config = new nlohmann::json;
-    std::ifstream ifs("../Trimming/config.json");
+    std::ifstream ifs(Root + "/config.json");
     ifs >> *m_config;
     ifs.close();
 

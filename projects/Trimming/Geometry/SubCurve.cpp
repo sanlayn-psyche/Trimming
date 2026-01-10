@@ -7,7 +7,7 @@
 #include "LFParallelBox.h"
 #include "TrimLoop.h"
 #include "SpaceNode.h"
-#include "OCCT_Delegate.hpp"
+#include "OCCTDelegate.hpp"
 
 #include "output.h"
 #include "log.h"
@@ -645,7 +645,7 @@ BiMonoSubCurve::BiMonoSubCurve(const Point& p1, const Point& p2)
     newcv->m_mults = { 2, 2 };
     newcv->m_order = 2;
     newcv->m_weights = { 1, 1 };
-    newcv->m_delegate = new OCCT_DELEGATE_CURVE(newcv);
+    newcv->m_delegate = new OCCTDelegate_CURVE(newcv);
     newcv->m_type = CurveType::Line;
     newcv->act_findMonoPoints();
 

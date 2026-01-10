@@ -3,7 +3,7 @@
 #include "NurbsCurve.h"
 #include "log.h"
 #include "SubCurve.h"
-#include "OCCT_Delegate.hpp"
+#include "OCCTDelegate.hpp"
 
 void TrimLoop::init_loadFromBin(std::ifstream& fin)
 {

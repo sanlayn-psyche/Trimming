@@ -1,6 +1,6 @@
 #include "NurbsSurface.h"
 #include "NurbsCurve.h"
-#include "OCCT_Delegate.hpp"
+#include "OCCTDelegate.hpp"
 #include "LFParallelBox.h"
 
 #ifdef _DEBUG

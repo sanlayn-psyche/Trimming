@@ -6,11 +6,13 @@
 #include <vector>
 #include <mutex>
 #include "TrimShared.h"
-#include "nlohmann\json.hpp"
+#include "json.hpp"
 
 using std::string;
 using std::vector;
 class Patch;
+
+const std::string Root {RootPath};
 
 class TrimManager
 {

@@ -2,7 +2,7 @@
 #include "LFPoint.h"
 #include "SubCurve.h"
 #include "NurbsCurve.h"
-#include "OCCT_Delegate.hpp"
+#include "OCCTDelegate.hpp"
 #include <cmath>
 
 inline std::tuple<int, double> __iterate(double s, double t, std::function<double(double m)>& getstep)
@@ -291,7 +291,7 @@ void Ellip::act_loadFromTxt(std::ifstream& fin)
     m_endPoints.resize(2);
     fin >> m_endPoints[0] >> m_endPoints[1];
     m_aitiClockWise = (m_axis[0][0] * m_axis[1][1] - m_axis[1][0] * m_axis[0][1] > 0.0) ? true : false;
-    m_delegate = new OCCT_DELEGATE_CURVE(this);
+    m_delegate = new OCCTDelegate_CURVE(this);
 
     double a2 = 1.0 / (m_radius[0] * m_radius[0]);
     double b2 = 1.0 / (m_radius[1] * m_radius[1]);
@@ -522,7 +522,7 @@ void Ellip::act_flip()
     m_radius[0] = m_radius[1];
     m_radius[1] = r;
 
-    m_delegate = new OCCT_DELEGATE_CURVE(this);
+    m_delegate = new OCCTDelegate_CURVE(this);
 
 }
 

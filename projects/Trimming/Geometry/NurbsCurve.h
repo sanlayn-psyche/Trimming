@@ -5,7 +5,7 @@
 #include "TrimShared.h"
 
 using std::tuple;
-class OCCT_DELEGATE_CURVE;
+class OCCTDelegate_CURVE;
 
 class NurbsCurve: public Curve
 {
@@ -53,7 +53,7 @@ public:
     vector<double> m_knots;
     vector<int> m_mults;
 	vector<double> m_weights;
-    OCCT_DELEGATE_CURVE* m_delegate{ nullptr };
+    OCCTDelegate_CURVE* m_delegate{ nullptr };
 private:
     void act_lineCheck(const Frame& conserv_frame);
 };

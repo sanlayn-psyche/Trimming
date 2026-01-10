@@ -3,7 +3,7 @@
 #include <cassert>
 #include <set>
 #include "output.h"
-#include "OCCT_Delegate.hpp"
+#include "OCCTDelegate.hpp"
 
 #include "intersects.h"
 
@@ -41,7 +41,7 @@ void NurbsCurve::act_flip()
     {
         delete m_delegate;
     }
-    m_delegate = new OCCT_DELEGATE_CURVE(this);
+    m_delegate = new OCCTDelegate_CURVE(this);
 }
 
 
@@ -183,7 +183,7 @@ NurbsCurve::NurbsCurve(Point p1, Point p2)
     {
         m_knots.insert(m_knots.end(), m_mults[i], m_spans[i]);
     }
-    m_delegate = new OCCT_DELEGATE_CURVE(this);
+    m_delegate = new OCCTDelegate_CURVE(this);
 
 }
 NurbsCurve::~NurbsCurve()
@@ -317,7 +317,7 @@ void NurbsCurve::act_loadFromBin(std::ifstream& fin)
         m_controlPoints[i] = Point{ vec[0], vec[1]};
         m_weights[i] = vec[2];
     }
-    m_delegate = new OCCT_DELEGATE_CURVE(this);
+    m_delegate = new OCCTDelegate_CURVE(this);
 }
 
 
@@ -358,7 +358,7 @@ void NurbsCurve::act_loadFromTxt(std::ifstream& fin)
             m_controlPoints[i][1] += 0.04;
         }*/
     }
-    m_delegate = new OCCT_DELEGATE_CURVE(this);
+    m_delegate = new OCCTDelegate_CURVE(this);
 }
 
 int NurbsCurve::get_data_size()

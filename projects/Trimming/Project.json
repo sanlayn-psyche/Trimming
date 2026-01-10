@@ -1,5 +1,6 @@
 {
     "name": "Trimming",
+    "cpp_standard": 20,
     "version": "1.0.0",
     "source_dirs": [
         "./Geometry",
@@ -9,12 +10,17 @@
     "include_dirs": [
         "./Geometry/",
         "./Tool/",
-        "./PDTrimming/"
+        "./PDTrimming/",
+        "../../3rdparty/stb",
+        "E:/Develop/Eigen/",
+        "E:\\Develop\\nlohmann"
     ],
     "dependencies": [
-        "${OCCT}",
-        "Eigen",
-        "stb"
+        "E:\\Users\\sanlayn\\Source\\Repos\\3rdparty-vc14-64\\jemalloc-vc14-64",
+        "E:\\Users\\sanlayn\\Source\\Repos\\3rdparty-vc14-64\\tcltk-8.6.15-x64",
+        "E:\\Users\\sanlayn\\Source\\Repos\\3rdparty-vc14-64\\tbb-2021.13.0-x64",
+        "E:\\Users\\sanlayn\\Source\\Repos\\3rdparty-vc14-64\\vtk-9.4.1-x64",
+        "E:\\Users\\sanlayn\\Source\\Repos\\opencascade-7.9.3-vc14-64\\"
     ],
     "executable": {
         "compile": true,

@@ -1,9 +1,12 @@
 {
   "Model": [
-    "D:/Project/NurbsViwer/Resource/model/",
-    "buick_tvcg"
+    "e:\\Users\\sanlayn\\Source\\Repos\\model\\",
+    "buick_new"
   ],
   "Render": {
+    "MeshletNum": [
+      2488576
+    ],
     "OIT": {
       "Enable": [
         0
@@ -16,11 +19,8 @@
       84
     ],
     "WindowSize": [
-      1920,
-      1080
-    ],
-    "MeshletNum": [
-      2488576
+      3840,
+      1260
     ],
     "method": [
       "fp16denserecover"
@@ -31,11 +31,11 @@
       "Enable": [
         0
       ],
-      "RotSamples": [
-        64
-      ],
       "RotFreq": [
         10
+      ],
+      "RotSamples": [
+        64
       ]
     },
     "DuplicateNum": [
@@ -51,16 +51,18 @@
     }
   },
   "Trimming": {
+    "BezierWise": 1,
     "Enable": 1,
-    "Preproccess": {
-      "DebugStartFrom": 1,
-      "SkipExisting": 1,
-      "ThreadWaitTime": 1000,
-      "WorkerThreadCnt": 8
-    },
+    "EvalMethod": "ls",
     "GenerateMode": 0,
-    "SearchMethod": "KD",
-    "EvalMethod": "BIN_EVAL",
-    "PatchPerFolder": 1000
+    "OnlyTree": 0,
+    "PatchPerFolder": 1000,
+    "Preproccess": {
+      "DebugStartFrom": 102166,
+      "SkipExisting": 1,
+      "ThreadWaitTime": 50000,
+      "WorkerThreadCnt": 6
+    },
+    "SearchMethod": "gb"
   }
 }
