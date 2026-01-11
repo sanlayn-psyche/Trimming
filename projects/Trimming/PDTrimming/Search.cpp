@@ -990,8 +990,11 @@ float SearchDelegate_BSP::act_search_leaf(const float* corse, const float* fine,
     end = abs(end) - 1;
     int mid = (start + end) / 2;
     Point p1, p2;
+    int loop_counter = 0;
     while ((end - start > 1))
     {
+        loop_counter++;
+        if (loop_counter > 1000) throw lf_exception_dead_loop("SearchDelegate_BSP::act_search_leaf infinite loop");
         p1[0] = corse[4 * mid];
         p1[1] = corse[4 * mid + 1];
         p2[0] = corse[4 * mid + 2];
@@ -1076,8 +1079,11 @@ int SearchDelegate_BSP::get_leaf_searchtime(const float* corse, const float* fin
     end = abs(end) - 1;
     int mid = (start + end) / 2;
     Point p1, p2;
+    int loop_counter = 0;
     while ((end - start > 1))
     {
+        loop_counter++;
+        if (loop_counter > 1000) throw lf_exception_dead_loop("SearchDelegate_BSP::get_leaf_searchtime infinite loop");
         seatchtime++;
         p1[0] = corse[4 * mid];
         p1[1] = corse[4 * mid + 1];
@@ -1574,8 +1580,11 @@ float SearchDelegate_optKD::get_dist(const int* offset, const float* tree, const
     int dir = tree[0];
     float key = tree[1];
 
+    int loop_counter = 0;
     while (dir <= 1)
     {
+        loop_counter++;
+        if (loop_counter > 1000) throw lf_exception_dead_loop("SearchDelegate_optKD::get_dist infinite loop");
         float check_value = u;
         if (dir == 1)
         {
@@ -1605,8 +1614,11 @@ float SearchDelegate_optKD::get_dist(const int* offset, const float* tree, const
     int num_slab = corse[1];
     corse += 2;
     int ite = 0;
+    loop_counter = 0;
     while (ite < num_slab - 1 && v >= corse[ite + 1])
     {
+        loop_counter++;
+        if (loop_counter > 20000) throw lf_exception_dead_loop("SearchDelegate_optKD::get_dist slab loop infinite loop");
         ite++;
     }
     if (ite >= num_slab - 1)

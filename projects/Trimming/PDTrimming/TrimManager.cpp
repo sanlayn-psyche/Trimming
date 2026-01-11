@@ -298,6 +298,17 @@ void TrimManager::init_resolve()
     double frac = double(m_existingPatches.size()) / double(m_totalNumber);
 
     m_processedNum = m_existingPatches.size();
+    if (m_startId > 0)
+    {
+        int limit = std::min(m_startId, m_totalNumber);
+        for (int i = 0; i < limit; i++)
+        {
+            if (m_existingPatches.find(i) == m_existingPatches.end())
+            {
+                m_processedNum++;
+            }
+        }
+    }
     std::cout << std::to_string(this->m_existingPatches.size()) + " patches has been processed before this run" << std::endl;
 
     int bz_cnt;

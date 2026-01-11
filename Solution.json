@@ -1,7 +1,6 @@
 {
     "name": "Trimming",
     "projects": [
-        "projects/Test",
-        "projects/Viewer"
+        "projects/Test"
     ]
 }
