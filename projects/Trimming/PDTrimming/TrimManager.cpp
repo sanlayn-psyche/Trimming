@@ -912,6 +912,11 @@ void TrimManager::act_resolveOne(TrimManager* tm_ptr, std::atomic<int64_t>* cloc
             error_flag = true;
             __atomic_print(exp.what());
         }
+        catch (...)
+        {
+            error_flag = true;
+            __atomic_print("Unknown exception caught in worker thread");
+        }
    
         if (!error_flag)
         {

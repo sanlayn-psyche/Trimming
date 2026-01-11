@@ -328,20 +328,25 @@ void CutInfo_BSP::get_optimal_split()
     }
     else
     {
+        bool valid = false;
         for (size_t i = 0; i < m_candidates.size(); i += 2) 
         {
             auto cut_value = act_eval_cut2(m_candidates[i], m_candidates[i + 1]);
             if (if_better(cut_value, best))
             {
-                  m_node->m_type = NodeType::BSP;
-                  best = cut_value;
-                  m_fixedPoint = m_candidates[i];
-                  m_orth = m_candidates[i + 1];
-                  if (if_best(best))
-                  {
-                      m_candidates.clear();
-                      return;
-                  }
+                valid = true;
+                m_node->m_type = NodeType::BSP;
+                best = cut_value;
+                m_fixedPoint = m_candidates[i];
+                m_orth = m_candidates[i + 1];
+                if (if_best(best))
+                {
+                    m_candidates.clear();
+                    return;
+                 }
+            }
+            if (i > 1000 && valid) {
+                break;
             }
         }
     }

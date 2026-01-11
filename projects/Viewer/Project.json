@@ -1,5 +1,6 @@
 {
     "name": "TrimmingViewer",
+    "cpp_standard": 20,
     "version": "1.0.0",
     "source_dirs": [
         "./QtUI"
@@ -8,6 +9,7 @@
     "dependencies": [
         "../Trimming"
     ],
+    "custom_cmake": "QtUI/QtSetup.cmake",
     "executable": {
         "compile": true,
         "entry_file": "main.cpp"

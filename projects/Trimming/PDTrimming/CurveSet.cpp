@@ -127,8 +127,11 @@ bool Slab::act_compare(const MonoSubCurve* sc1, const MonoSubCurve* sc2)
 
 	double temp = 0;
 	double x = 1.0, y = 2.0;
-	while (temp == 0.0)
+	int loop_counter = 0;
+	while (abs(temp) < FLOAT_ZERO_GEOMETRY_COMPUTE)
 	{
+		loop_counter++;
+		if (loop_counter > 100) throw lf_exception_dead_loop("Slab::act_compare infinite loop");
 		if (y > 8.0)
 		{
 			throw lf_exception_subcurves({ sc1, sc2 }, "suburves cannot be departed!");
