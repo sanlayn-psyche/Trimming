@@ -642,45 +642,25 @@ bool TrimManager::act_resolveModel()
 {
     init_resolve();
     int latest_processed_num = m_processedNum;
-
-    int64_t init_clock;
-    GetClock(init_clock);
-    std::vector<std::unique_ptr<std::atomic<int64_t>>> worker_clock_ptrs;
     std::vector<std::thread> worker_threads;
     std::vector<std::unique_ptr<PatchProperty>> props(m_workerThreadCnt);
+    std::vector<std::unique_ptr<std::atomic<int64_t>>> worker_clocks(m_workerThreadCnt);
+    int64_t init_clock = 0;
 
     for (int tidx = 0; tidx < m_workerThreadCnt; tidx++)
     { 
         props[tidx] = std::make_unique<PatchProperty>(m_patch_prop);
-        worker_clock_ptrs.emplace_back(std::make_unique<std::atomic<int64_t>>(init_clock));
-        worker_threads.emplace_back(std::thread(TrimManager::act_resolveOne, this, worker_clock_ptrs[tidx].get(), props[tidx].get()));
-        auto& t = worker_threads.back();
-        std::cout << "Create theread: id = " << std::to_string(int(t.native_handle())) << std::endl;
-        t.detach();
+        worker_clocks[tidx] = std::make_unique<std::atomic<int64_t>>(init_clock);
+        worker_threads.emplace_back(std::thread(TrimManager::act_resolveOne, this, worker_clocks[tidx].get(), props[tidx].get()));
+        
+        std::stringstream ss;
+        ss << "Create thread: id = " << worker_threads.back().get_id();
+        std::cout << ss.str() << std::endl;
     }
 
-    while (true)
+    while (m_processedNum < m_totalNumber)
     {
-        std::this_thread::yield();
-
-        int64_t current_clock;
-        GetClock(current_clock);
-
-        for (int tidx = 0; tidx < m_workerThreadCnt; tidx++)
-        {
-            auto worker_duraction = worker_clock_ptrs[tidx]->load();
-            if ((current_clock > worker_duraction) && ((current_clock - worker_duraction) > m_threadHoldTime))
-            {
-                ::TerminateThread(worker_threads[tidx].native_handle(), 0);
-                g_threadCnt.fetch_sub(1);
-
-                worker_clock_ptrs[tidx]->store(current_clock);
-                auto& worker_t = worker_threads[tidx];
-                worker_t = std::thread(TrimManager::act_resolveOne, this, worker_clock_ptrs[tidx].get(), props[tidx].get());
-                std::cout << "Create theread: id = "<< std::to_string(int(worker_t.native_handle())) << std::endl;
-                worker_t.detach();
-            }
-        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
         int current_processed_num = this->m_processedNum;
         (*m_modelInfo)["ProcessedPatch"] = current_processed_num;
@@ -693,18 +673,26 @@ bool TrimManager::act_resolveModel()
             std::cout << debug_info << std::endl;
         }
 
-        if (this->m_processedNum >= this->m_totalNumber)
+        if (m_processedNum >= m_totalNumber)
         {
-            std::cout << "Process finished!" << std::endl;
-
-            if (m_ifErrorDetected == true)
-            {
-                m_errorLog.close();
-                m_ifErrorDetected = false;
-            }
-            break;
+             break;
         }
     }
+
+    for (auto& t : worker_threads)
+    {
+        if(t.joinable())
+            t.join();
+    }
+    
+    std::cout << "Process finished!" << std::endl;
+
+    if (m_ifErrorDetected == true)
+    {
+        m_errorLog.close();
+        m_ifErrorDetected = false;
+    }
+
     act_updataModleInfo();
     return true;
 }
@@ -967,52 +955,32 @@ bool TrimManager::act_combineWhileResolve()
     fouts[5].open(namePrefix + "geom.bin", std::ios::binary);
     fouts[6].open(namePrefix + "trim.bin", std::ios::binary);
     fouts[7].open(namePrefix + "flag.bin", std::ios::binary);
-    int64_t init_clock;
-    GetClock(init_clock);
-    std::vector<std::atomic<int64_t>*> worker_clock_ptrs;
     std::vector<std::thread> worker_threads;
-    std::vector<PatchProperty*> props;
+    std::vector<std::unique_ptr<PatchProperty>> props;
+    // Dummy clocks
+    std::vector<std::unique_ptr<std::atomic<int64_t>>> worker_clocks;
+    int64_t init_clock = 0;
+
     for (int tidx = 0; tidx < m_workerThreadCnt; tidx++)
     {
-        props.emplace_back(new PatchProperty());
+        props.emplace_back(std::make_unique<PatchProperty>());
         props[tidx]->m_bezier_wise = 1;
         props[tidx]->m_eval_ptr = std::make_shared<EvalDelegate_ls>();
         props[tidx]->m_search_ptr = std::make_shared<SearchDelegate_GridBSP>();
         props[tidx]->m_load_mode = 0;
 
-        worker_clock_ptrs.emplace_back(new std::atomic<int64_t>(init_clock));
-        worker_threads.emplace_back(std::thread(TrimManager::act_resolveOne, this, worker_clock_ptrs[tidx], props[tidx]));
-        auto& t = worker_threads.back();
-        std::cout << "Create theread: id = " << std::to_string(int(t.native_handle())) << std::endl;
-        //t.join();
-        t.detach();
+        worker_clocks.emplace_back(std::make_unique<std::atomic<int64_t>>(init_clock));
+
+        worker_threads.emplace_back(std::thread(TrimManager::act_resolveOne, this, worker_clocks[tidx].get(), props[tidx].get()));
+        
+        std::stringstream ss;
+        ss << "Create thread: id = " << worker_threads.back().get_id();
+        std::cout << ss.str() << std::endl;
     }
 
-    while (true)
+    while (m_processedNum < m_totalNumber)
     {
-        std::this_thread::yield();
-
-        int64_t current_clock;
-        GetClock(current_clock);
-
-        for (int tidx = 0; tidx < m_workerThreadCnt; tidx++)
-        {
-            auto worker_duraction = worker_clock_ptrs[tidx]->load();
-            if ((current_clock > worker_duraction) && ((current_clock - worker_duraction) > m_threadHoldTime))
-            {
-                ::TerminateThread(worker_threads[tidx].native_handle(), 0);
-                g_threadCnt.fetch_sub(1);
-
-                worker_clock_ptrs[tidx]->store(current_clock);
-
-                auto& worker_t = worker_threads[tidx];
-                PatchProperty* prp = new PatchProperty();
-                worker_t = std::thread(TrimManager::act_resolveOne, this, worker_clock_ptrs[tidx], prp);
-                std::cout << "Create theread: id = " << std::to_string(int(worker_t.native_handle())) << std::endl;
-                //worker_t.join();
-                worker_t.detach();
-            }
-        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
         int current_processed_num = this->m_processedNum;
         (*m_modelInfo)["ProcessedPatch"] = current_processed_num;
@@ -1028,7 +996,6 @@ bool TrimManager::act_combineWhileResolve()
         if (this->m_processedNum >= this->m_totalNumber)
         {
             std::cout << "Process finished!" << std::endl;
-
             if (m_ifErrorDetected == true)
             {
                 m_errorLog.close();
@@ -1036,6 +1003,10 @@ bool TrimManager::act_combineWhileResolve()
             }
             break;
         }
+    }
+
+    for(auto &t : worker_threads) {
+        if(t.joinable()) t.join();
     }
     fouts[0].write((char*)m_data_array0.data(), m_data_array0.size() * 4);
     fouts[1].write((char*)m_data_array1.data(), m_data_array1.size() * 4);
