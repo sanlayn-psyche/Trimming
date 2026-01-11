@@ -127,8 +127,11 @@ void TrimLoop::act_sortCurveSet(vector<SubCurve*>& cvs)
 
     int counter;
 
+    int loop_counter = 0;
     while (cvs.size() > 0)
     {
+        loop_counter++;
+        if (loop_counter > 10000) throw lf_exception_dead_loop("TrimLoop::act_sortCurveSet infinite loop");
         auto pite = cvs.begin();
         counter = 0;
         while (pite != cvs.end())

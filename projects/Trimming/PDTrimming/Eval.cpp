@@ -179,8 +179,11 @@ double EvalDelegate_bineval::get_dist(const float* detail, double u, double v, P
 	int imin = 0, imax = bezier_cnt;
 	int icenter = (imin + imax) / 2;
 	//__debug_break(u < 1.1303598880767822 && u > 1.12 && v < 1.0899274349212646 && v > 0.92);
+	int loop_counter = 0;
 	while (imax > imin)
 	{
+		loop_counter++;
+		if (loop_counter > 200) throw lf_exception_dead_loop("EvalDelegate_bineval::get_dist infinite loop");
 		//p1[0] = detail[length * icenter];
 		//p2[0] = detail[1 + length * icenter];
 		//p1[1] = detail[2 + length * icenter];
@@ -303,8 +306,11 @@ int EvalDelegate_bineval::get_seachtime(const float* detail, double u, double v,
 	int imin = 0, imax = bezier_cnt;
 	int icenter = (imin + imax) / 2;
 	//__debug_break(u < 1.1303598880767822 && u > 1.12 && v < 1.0899274349212646 && v > 0.92);
+	int loop_counter = 0;
 	while (imax > imin)
 	{
+		loop_counter++;
+		if (loop_counter > 200) throw lf_exception_dead_loop("EvalDelegate_bineval::get_seachtime infinite loop");
 		searchtime++;
 		//p1[0] = detail[length * icenter];
 		//p2[0] = detail[1 + length * icenter];
@@ -663,10 +669,13 @@ float EvalDelegate_implicit::get_dist(float* uv, float*& corse, float*& fine, bo
 	{
 		if (umin < uv[0] && umax > uv[0])
 		{
-			int imin = 0, imax = bezier_cnt;
-			int icenter = (imin + imax) / 2;
-			while (1)
-			{
+            int imin = 0, imax = bezier_cnt;
+            int icenter = (imin + imax) / 2;
+            int loop_counter = 0;
+            while (1)
+            {
+                loop_counter++;
+                if (loop_counter > 200) throw lf_exception_dead_loop("EvalDelegate_implicit::get_dist infinite loop");
 				umin = corse[4 * icenter];
 				umax = corse[1 + 4 * icenter];
 				vmin = corse[2 + 4 * icenter];

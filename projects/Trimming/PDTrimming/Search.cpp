@@ -49,8 +49,11 @@ float SearchDelegate_KD::get_dist(const int* offset, const float* tree, const fl
     int dir = tree[0];
     float key = tree[1];
 
+    int loop_counter = 0;
     while (dir <= 1)
     {
+        loop_counter++;
+        if (loop_counter > 1000) throw lf_exception_dead_loop("SearchDelegate_KD::get_dist infinite loop in tree traversal");
         float check_value = u;
         if (dir == 1)
         {
@@ -153,8 +156,11 @@ int SearchDelegate_KD::get_searchtime(const int* offset, const float* tree, cons
 
     int searchtime = 0;
 
+    int loop_counter = 0;
     while (dir <= 1)
     {
+        loop_counter++;
+        if (loop_counter > 1000) throw lf_exception_dead_loop("SearchDelegate_KD::get_searchtime infinite loop in tree traversal");
         float check_value = u;
         if (dir == 1)
         {
@@ -276,7 +282,10 @@ void SearchDelegate_KD::act_opt_overlap(CurveSet_NODE& node)
 
     act_compute_costs(curve_cost_ptr);
     bool is_reduce = false;
+    int loop_counter = 0;
     do {
+        loop_counter++;
+        if (loop_counter > 20000) throw lf_exception_dead_loop("SearchDelegate_KD::act_opt_overlap infinite loop in reduction");
         std::make_heap(curve_cost_ptr.begin(), curve_cost_ptr.end(), [](CurveAndCost *mono1, CurveAndCost *mono2) {return mono1->m_overlapCost < mono2->m_overlapCost; });
         is_reduce = false;
         int latest_legnth = curve_cost_ptr.size();
@@ -570,8 +579,11 @@ SpaceNode* SearchDelegate::act_genetate_tree(SpaceNode* root, int maxdepth)
     if (root != nullptr)
     {
         vector<SpaceNode*> visitList{ root };
+        int loop_counter = 0;
         while (!visitList.empty())
         {
+            loop_counter++;
+            if (loop_counter > 100000) throw lf_exception_dead_loop("SearchDelegate::act_genetate_tree infinite loop");
             auto ite = visitList.back();
             visitList.pop_back();
             if (ite->m_depth_tree > maxdepth)
@@ -667,8 +679,11 @@ void SearchDelegate_GridBSP::act_generate_default(vector<SpaceNode*>& roots)
 void SearchDelegate_GridBSP::act_generate(vector<SpaceNode*>& roots)
 {
     std::vector<SpaceNode*> rootList = roots;
+    int loop_counter = 0;
     while (rootList.size() > 0)
     {
+        loop_counter++;
+        if (loop_counter > 100000) throw lf_exception_dead_loop("SearchDelegate_GridBSP::act_generate infinite loop");
         auto ite = rootList.back();
         rootList.pop_back();
         ite->m_cutInfo = new CutInfo_Grid(*ite, m_grid_size[0], m_grid_size[1]);

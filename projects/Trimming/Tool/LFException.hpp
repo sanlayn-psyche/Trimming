@@ -132,3 +132,16 @@ public:
 private:
 	bool m_if_parent{false};
 };
+
+class lf_exception_dead_loop : public lf_exception
+{
+public:
+	lf_exception_dead_loop(const char* info = "Dead loop detected. ")
+	{
+		m_errorInfo = info;
+		m_errorCode = 5;
+	}
+#ifdef _DEBUG
+	void act_output() const override {}
+#endif // _DEBUG
+};
