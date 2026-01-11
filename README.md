@@ -24,5 +24,9 @@ python CMakeTool/gen_cmake.py
 
 3. 使用 CMake 工具生成项目文件。推荐使用 CLion;
 
-
 4. 调用入口在 projects/Trimming/main.cpp 或 projects/Test/main.cpp;
+
+5. (可选) 基于 Qt6 的 GUI。在 projects/Viewer/QtUI/QtSetup.cmake 中配置 QQT_INSTALL_DIR 为你的 Qt6 安装路径。
+
+6. (可选) 库安装，在 build 目录下执行，`cmake --install`，被设置为库的工程就会安装到它指定的目录中。之后可以作为一个独立的 C++ 库调用。
+ 
