@@ -23,4 +23,101 @@
         * 而 offset 表又是定长的，可以提前锁定 size。
 
 
-sss
+
+### 详细设计：基于策略注入的层次化并行任务管理与存储方案
+
+#### 1. 动态自底向上任务状态追踪 (Dynamic Bottom-Up Task Aggregator)
+为了处理极大规模任务且无需预先构建完整的树结构，采用动态按需增长的架构：
+*   **自底向上生长 (On-demand Growth)**：
+    *   **任务分发**：全局维护一个 `std::atomic<int> g_task_id_counter`，线程通过 `fetch_add` 领取一个任务包（例如 64 个连续 ID）。
+    *   **节点寻址**：任何任务 ID `i` 在第 `L` 层的分箱 ID 为 `idx_L = i / (64^L)`。
+    *   **Trunk Map**：使用全局注册表（如 `std::unordered_map<uint64_t, TrunkNode*>`，Key 为 `(Level << 56) | Index`）保存存活的节点信息。
+*   **原子化节点创建与汇报**：
+    *   **延迟原子操作 (Lazy Sync)**：线程在处理完本地 64 个任务前，仅更新 TLS (Thread Local Storage) 的 `local_mask`。当一个 Block 处理完或线程需要跨越 64 进制边界时，同步至 Level 1 节点。
+    *   **递归汇报逻辑 (Ascending Report)**：
+        1.  当 Level `L` 的节点 `Mask` 被 `fetch_or` 填满后，计算父节点（Level `L+1`）的 ID。
+        2.  **原子创建父节点**：在全局 Map 中查找父节点，若不存在，则加锁并再次确认（Double-Checked Locking）或使用原子插入，确保父节点被唯一创建。
+        3.  将当前节点的“完成信号”上报给父节点：执行 `parent_node->mask.fetch_or(1ULL << (current_node_id % 64))`。
+        4.  递归此过程，直到上报至最高层。
+*   **全局终点判定**：
+    *   由于总任务数 `N` 已知，可以预计算根节点的 `TargetMask`（例如任务总数为 100，则根节点 Mask 只有前面的几位被置 1）。
+    *   当根节点达到 `TargetMask` 时，由该线程宣告整个解析与聚合过程完成。
+
+
+#### 2. 高性能并行存储架构 (Storage Management)
+针对变长数据与定长索引的不同特性：
+*   **定长 Record 表 (如 Offset 表)**：
+    *   **槽位寻址**：由于每个槽位定长（如 220 字节），且 BezierID 已知，每个任务的物理写入空间为 `Offset = BezierID * 220`。
+    *   **内存映射 (Mmap)**：通过 `CreateFileMapping` / `MapViewOfFile` 等 API 将文件映射到内存空间，多线程直接根据偏移指针写入，利用操作系统的虚拟内存管理实现高效的异步页落盘。
+*   **变长 Data 堆 (具体二进制数据)**：
+    *   **原子占坑 (Space Reservation)**：使用一个全局 `std::atomic<size_t> g_data_pointer`。线程写之前，计算自身 Buffer 长度 `len`，执行 `start_offset = g_data_pointer.fetch_add(len)`。
+    *   **无锁并行写入**：拿到 `start_offset` 后，面向 Windows 使用 `WriteFile` 配合 `OVERLAPPED` 结构直接向文件的指定位置写入数据。由于已提前占坑，多线程写入区域完全隔离，无需互斥锁。
+    *   **扩容与收缩**：
+        *   采用 1.5x-2x 扩张策略：当占坑后的偏移超过当前文件大小时，触发统一的文件 Resize 动作。
+        *   **Shrink to fit**：所有并行任务结束后，调用一次 `SetEndOfFile` 将文件截断到 `g_data_pointer` 的最终确切位置，确保文件紧凑。
+
+#### 3. 架构拆分：管理模板与用户策略 (Framework vs. Policy)
+为了保证高度解耦，整个系统分为 **通用管理框架 (ParallelManager)** 与 **具体业务策略 (UserPolicy)** 两个核心部分。
+
+##### 3.1 通用管理框架 (ParallelManager - 框架侧)
+框架负责“怎么运行”和“数据流转”，对具体业务逻辑完全透明。其核心职责包括：
+*   **任务分发器**：管理 `atomic<int>` 计数器，负责 Batch ID 的分配。
+*   **状态树维护**：实现上述的“动态自底向上生长”逻辑，维护 Trunk Map 和原子 Mask 更新。
+*   **物理存储管理**：
+    *   管理 Data 堆文件和 Record 表文件的生命周期。
+    *   提供原子占坑接口（`ReserveDataSpace(size)`）。
+    *   处理文件扩张（1.5x 策略）和最终收缩（Shrink）。
+*   **生命周期回调**：在任务开始前调用 `Policy::OnInit()`，所有完成后调用 `Policy::OnFinalize()`。
+
+##### 3.2 用户策略约束 (ParallelTaskPolicy Concept)
+采用 C++20 Concept 对用户定义的策略类进行形式化约束，确保类型安全与编译期检查。
+
+```cpp
+template<typename P>
+concept ParallelTaskPolicy = requires(P p, int id, typename P::TaskResult res, void* slot, std::ostream& os) {
+    // 1. 必须定义嵌套的结果类型
+    typename P::TaskResult;
+
+    // 2. 核心处理逻辑：输入 ID，输出结果
+    { p.Process(id) } -> std::same_as<typename P::TaskResult>;
+
+    // 3. 结果大小查询
+    { p.GetRecordSize() } -> std::same_as<size_t>;             // 定长槽位大小
+    { p.GetDataSize(res) } -> std::same_as<size_t>;            // 变长数据大小
+
+    // 4. 序列化行为
+    { p.SerializeRecord(slot, res) } -> std::same_as<void>;    // 写入 Record 表
+    { p.SerializeData(os, res) } -> std::same_as<void>;        // 写入 Data 堆
+};
+```
+
+*   **Policy 类实现示例**：
+    ```cpp
+    struct BezierPolicy {
+        struct TaskResult {
+            std::vector<char> raw_data;
+            uint64_t offsets[52];
+        };
+
+        TaskResult Process(int id) { /* 具体的解析逻辑 */ }
+        size_t GetRecordSize() const { return 220; }
+        size_t GetDataSize(const TaskResult& res) const { return res.raw_data.size(); }
+        void SerializeRecord(void* slot, const TaskResult& res) { memcpy(slot, res.offsets, 52 * 8); }
+        void SerializeData(std::ostream& os, const TaskResult& res) { os.write(res.raw_data.data(), res.raw_data.size()); }
+    };
+    ```
+
+
+##### 3.3 策略与数据分离原则 (Data-Logic Separation)
+*   **分离原因**：`TaskResult` 会频繁地在并行线程与存储管理模块间传递，而 `Policy` 通常作为单例或通过模板实例化存在于框架中。
+*   **交互流程**：
+    1.  线程调用 `Policy::Process(id)` 得到 `TaskResult`。
+    2.  框架调用 `TaskResult::GetDataSize()` 获取变长数据长度。
+    3.  框架 `atomic_add` 预留 Data 空间，并分配 Record 槽地址。
+    4.  框架并发调用 `Policy::SerializeData` 和 `Policy::SerializeRecord` 完成写磁盘。
+    5.  线程最后调用一次 `TrunkAggregator` 记录完成状态。
+
+
+#### 4. 关键技术细节
+*   **64-bit Offset 全链支持**：所有寻址逻辑强制使用 `uint64_t`。对应的 CUDA Kernel 和渲染 Shader 需要同步修改常量缓冲区布局，以支持超过 4GB 的模型寻址。
+*   **Cache Line 对齐**：`TrunkNode` 结构体确保 64 字节对齐，防止不同 Trunk 之间的 `atomic_or` 引起 CPU 缓存行的频繁失效震荡。
