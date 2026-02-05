@@ -17,6 +17,9 @@
 #include <vector>
 #include <memory>
 
+#include <array>
+#include <optional>
+
 namespace parallel_merge {
 
 /// 每个节点的最大子任务/子节点数量
@@ -24,41 +27,31 @@ constexpr uint32_t kNodeCapacity = 64;
 
 /**
  * @brief 层次化树节点
- * 
- * @tparam P 满足 ParallelTaskPolicy 的策略类型
- * 
- * 节点地址计算：
- * - 给定任务 ID `i`，它属于第 L 层的第 `idx_L = i / (64^L)` 个节点
- * - 全局 Key = (level << 48) | nodeIndex
- * 
- * 节点状态：
- * - mask: 原子位掩码，记录已完成的子任务/子节点
- * - targetMask: 目标掩码，尾部节点可能不满 64 个
  */
-template<ParallelTaskPolicy P>
+template<typename P>
 struct TrunkNode {
-    /// 原子位掩码，每 bit 代表一个子任务/子节点的完成状态
+    /// 处理完成位掩码：由工作线程在完成任务后设置
     std::atomic<uint64_t> mask{0};
     
-    /// 目标掩码，当 mask == targetMask 时节点完成
-    /// 完整节点为 ~0ULL，尾部节点根据实际子任务数设置
+    /// 已打包位掩码：由 Pack() 逻辑设置，追踪已落盘的任务
+    std::atomic<uint64_t> packedMask{0};
+    
+    /// 目标掩码
     uint64_t targetMask{~0ULL};
     
-    /// 节点所属层级（0 = 最底层，直接管理任务）
+    /// 节点所属层级
     uint32_t level{0};
     
-    /// 节点在本层级的索引
+    /// 节点索引
     uint64_t index{0};
     
-    /// 节点任务记录（由 Policy 定义）
+    /// 节点任务记录
     typename P::TaskLogNode nodeLog{};
     
-    /// L0 层独有：暂存任务结果
-    /// 中间层级此容器为空，子节点通过 TrunkManager 查询
-    std::vector<typename P::TaskResult> results;
-    
-    /// 预留结果容量（仅 L0 使用）
-    static constexpr size_t kResultsReserveSize = kNodeCapacity;
+    /// L0 层结果缓存：
+    /// 使用固定大小数组 + std::optional。
+    /// 工作线程根据 taskId % 64 直接存入对应槽位，无需锁竞争。
+    std::array<std::optional<typename P::TaskResult>, kNodeCapacity> results;
 
     // ========== 构造与状态查询 ==========
     
@@ -66,18 +59,18 @@ struct TrunkNode {
     
     TrunkNode(uint32_t lvl, uint64_t idx, uint64_t target = ~0ULL)
         : targetMask(target), level(lvl), index(idx)
-    {
-        if (level == 0) {
-            results.reserve(kResultsReserveSize);
-        }
-    }
+    {}
     
-    /// 检查节点是否已完成（mask 达到 targetMask）
+    /// 检查节点所有任务是否已处理完成
     [[nodiscard]] bool IsComplete() const noexcept {
         return mask.load(std::memory_order_acquire) == targetMask;
     }
+
+    /// 检查节点所有任务是否已打包落盘
+    [[nodiscard]] bool IsAllPacked() const noexcept {
+        return packedMask.load(std::memory_order_acquire) == targetMask;
+    }
     
-    /// 检查是否为 L0 层节点
     [[nodiscard]] bool IsLeafLevel() const noexcept {
         return level == 0;
     }
@@ -85,22 +78,28 @@ struct TrunkNode {
     // ========== 原子操作 ==========
     
     /**
-     * @brief 报告子任务/子节点完成
+     * @brief 提取待打包的位掩码
      * 
-     * @param bitIndex 子任务/子节点在本节点内的索引 [0, 63]
-     * @return 更新后的 mask 值
+     * @return 当前已完成但未打包的位掩码
      */
+    uint64_t GetToBePackedMask() const noexcept {
+        const uint64_t m = mask.load(std::memory_order_acquire);
+        const uint64_t p = packedMask.load(std::memory_order_acquire);
+        return m & (~p);
+    }
+
+    /**
+     * @brief 标记指定位已打包
+     */
+    void MarkPacked(uint64_t bitMask) noexcept {
+        packedMask.fetch_or(bitMask, std::memory_order_acq_rel);
+    }
+
     uint64_t ReportCompletion(uint32_t bitIndex) noexcept {
         const uint64_t bit = 1ULL << bitIndex;
         return mask.fetch_or(bit, std::memory_order_acq_rel) | bit;
     }
     
-    /**
-     * @brief 检查并标记完成状态
-     * 
-     * @param bitIndex 子任务/子节点在本节点内的索引
-     * @return true 如果本次操作导致节点完成（即最后一个子任务）
-     */
     bool ReportAndCheckComplete(uint32_t bitIndex) noexcept {
         const uint64_t newMask = ReportCompletion(bitIndex);
         return newMask == targetMask;
@@ -109,19 +108,12 @@ struct TrunkNode {
     // ========== L0 层结果管理 ==========
     
     /**
-     * @brief 添加任务结果（仅 L0 层使用）
+     * @brief 设置任务结果（仅 L0 层使用）
      * 
-     * @note 调用方需确保线程安全（通常每个 L0 节点由单一线程维护）
+     * @param slotIndex 槽位索引 [0, 63]
      */
-    void AddResult(typename P::TaskResult&& result) {
-        results.emplace_back(std::move(result));
-    }
-    
-    /**
-     * @brief 清空并返回所有结果（用于装箱后释放）
-     */
-    std::vector<typename P::TaskResult> TakeResults() {
-        return std::move(results);
+    void SetResult(uint32_t slotIndex, typename P::TaskResult&& result) {
+        results[slotIndex].emplace(std::move(result));
     }
 
     // ========== Key 计算工具 ==========
@@ -163,7 +155,7 @@ struct TrunkNode {
  * 
  * 线程持有一个栈式结构追踪当前维护的各层级节点
  */
-template<ParallelTaskPolicy P>
+template<typename P>
 struct LocalNodeEntry {
     uint64_t key;
     TrunkNode<P>* node;

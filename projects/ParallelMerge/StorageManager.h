@@ -17,6 +17,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <algorithm>
+#include <cstring>
 
 #ifdef _WIN32
     #ifndef WIN32_LEAN_AND_MEAN
@@ -423,7 +424,7 @@ public:
         }
         
         // 争抢扩容权
-        std::lock_guard lock(resizeMutex_);
+        std::lock_guard<std::mutex> lock(resizeMutex_);
         
         // Double-check
         currentSize = fileSize_.load(std::memory_order_acquire);
@@ -433,7 +434,7 @@ public:
         
         // 计算新大小（1.5x 或至少满足需求）
         size_t newSize = static_cast<size_t>(currentSize * kGrowthFactor);
-        newSize = std::max(newSize, requiredSize);
+        newSize = (std::max)(newSize, requiredSize);
         
         Resize(newSize);
     }

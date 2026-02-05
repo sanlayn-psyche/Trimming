@@ -181,18 +181,18 @@ private:
             // 4. 执行任务处理
             auto result = policy.Process(taskId);
             
-            // 5. 将结果暂存到 L0 节点
-            currentL0Node->AddResult(std::move(result));
+            // 5. 将结果存入 L0 节点的独立槽位（线程安全）
+            currentL0Node->SetResult(bitIndex, std::move(result));
             
             // 6. 更新节点任务记录
             policy.Update(currentL0Node->nodeLog);
             
-            // 7. 标记任务完成
+            // 7. 标记任务状态（已处理完成，但尚未落盘）
             bool nodeComplete = currentL0Node->ReportAndCheckComplete(bitIndex);
             completedTasks_.fetch_add(1, std::memory_order_acq_rel);
             
-            // 8. 检查是否需要装箱
-            if (policy.ShouldPack(currentL0Node->nodeLog) || nodeComplete) {
+            // 8. 检查是否需要装箱 (Node-Driven)
+            if (policy.ShouldPack(*currentL0Node) || nodeComplete) {
                 ExecutePacking(policy, currentL0Node);
                 
                 if (nodeComplete) {
@@ -290,12 +290,8 @@ private:
      * @brief 执行装箱操作
      */
     void ExecutePacking(P& policy, NodeType* node) {
-        // 调用策略的装箱方法
-        policy.Pack();
-        
-        // 清空已处理的结果（释放内存）
-        // 注意：实际的序列化应该在 Pack() 中完成
-        // 这里仅作为示例，具体实现取决于 Policy
+        // 调用策略的装箱方法，传入节点上下文
+        policy.Pack(*node);
     }
 
 private:

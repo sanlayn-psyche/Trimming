@@ -17,27 +17,12 @@
 
 namespace parallel_merge {
 
+template<typename P> struct TrunkNode;
+
 /**
  * @brief ParallelTaskPolicy Concept
  * 
  * 用户定义的策略类必须满足此 Concept 才能与 ParallelManager 框架配合使用。
- * 
- * 要求的类型成员：
- * - TaskResult:     单个任务在内存中的缓存结果
- * - TaskLogGlobal:  全局任务状态记录表
- * - TaskLogNode:    节点所属的任务状态记录表
- * 
- * 要求的静态方法：
- * - OnInit():       初始化回调，返回 TaskLogGlobal
- * - OnFinalize():   收尾回调
- * 
- * 要求的成员方法：
- * - Process(id):    处理单个任务，返回 TaskResult
- * - Update(log):    更新节点任务记录
- * - SerializeRecord(slot, result): 写入定长 Record 表
- * - SerializeData(os, result):     写入变长 Data 堆
- * - ShouldPack(log): 判断是否应该触发装箱
- * - Pack():         执行装箱动作
  */
 template<typename P>
 concept ParallelTaskPolicy = requires(
@@ -45,6 +30,7 @@ concept ParallelTaskPolicy = requires(
     uint64_t id,
     typename P::TaskResult result,
     typename P::TaskLogNode& nodeLog,
+    TrunkNode<P>& node,
     void* slot,
     std::ostream& os
 ) {
@@ -85,13 +71,13 @@ concept ParallelTaskPolicy = requires(
     /// 将结果写入变长 Data 堆
     { p.SerializeData(os, result) } -> std::same_as<void>;
 
-    // ========== 6. 装箱逻辑 ==========
+    // ========== 6. 节点驱动的装箱逻辑 ==========
     
-    /// 判断是否应该触发装箱（基于节点的任务记录）
-    { p.ShouldPack(nodeLog) } -> std::convertible_to<bool>;
+    /// 判断是否应该触发装箱（基于其节点状态或 mask）
+    { p.ShouldPack(node) } -> std::convertible_to<bool>;
     
-    /// 执行装箱动作
-    { p.Pack() } -> std::same_as<void>;
+    /// 执行装箱动作（处理 node.results 中的数据）
+    { p.Pack(node) } -> std::same_as<void>;
 };
 
 /**

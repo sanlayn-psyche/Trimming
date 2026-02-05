@@ -14,6 +14,7 @@
 
 #include <unordered_map>
 #include <shared_mutex>
+#include <mutex>
 #include <memory>
 #include <optional>
 
@@ -77,7 +78,7 @@ public:
      * @return 节点指针，若不存在返回 nullptr
      */
     [[nodiscard]] NodeType* Get(uint64_t key) const {
-        std::shared_lock lock(mutex_);
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         auto it = trunkMap_.find(key);
         return it != trunkMap_.end() ? it->second.get() : nullptr;
     }
@@ -103,7 +104,7 @@ public:
         
         // 快速路径：读锁检查
         {
-            std::shared_lock lock(mutex_);
+            std::shared_lock<std::shared_mutex> lock(mutex_);
             auto it = trunkMap_.find(key);
             if (it != trunkMap_.end()) {
                 return it->second.get();
@@ -111,7 +112,7 @@ public:
         }
         
         // 慢速路径：写锁创建
-        std::unique_lock lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         
         // Double-check
         auto it = trunkMap_.find(key);
@@ -139,7 +140,7 @@ public:
         
         const uint64_t key = node->GetKey();
         
-        std::unique_lock lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         auto [it, inserted] = trunkMap_.try_emplace(key, std::move(node));
         return inserted;
     }
@@ -155,7 +156,7 @@ public:
         auto node = std::make_unique<NodeType>(0, nodeIndex, targetMask);
         NodeType* ptr = node.get();
         
-        std::unique_lock lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         const uint64_t key = ptr->GetKey();
         trunkMap_.emplace(key, std::move(node));
         
@@ -168,7 +169,7 @@ public:
      * @brief 获取当前注册的节点数量
      */
     [[nodiscard]] size_t Size() const {
-        std::shared_lock lock(mutex_);
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         return trunkMap_.size();
     }
     
@@ -283,7 +284,7 @@ private:
      * @brief 为所有层级预创建节点
      */
     void PreCreateNodesForAllLevels(size_t count) {
-        std::unique_lock lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         
         for (uint32_t level = 0; level <= maxLevel_; ++level) {
             for (size_t i = 0; i < count; ++i) {
