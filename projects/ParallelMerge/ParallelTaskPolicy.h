@@ -14,10 +14,12 @@
 #include <concepts>
 #include <cstdint>
 #include <ostream>
+#include <span>
+#include <vector>
 
 namespace parallel_merge {
 
-template<typename P> struct TrunkNode;
+// Policy no longer needs to know about TrunkNode internal structure
 
 /**
  * @brief ParallelTaskPolicy Concept
@@ -30,7 +32,6 @@ concept ParallelTaskPolicy = requires(
     uint64_t id,
     typename P::TaskResult result,
     typename P::TaskLogNode& nodeLog,
-    TrunkNode<P>& node,
     void* slot,
     std::ostream& os
 ) {
@@ -73,11 +74,25 @@ concept ParallelTaskPolicy = requires(
 
     // ========== 6. 节点驱动的装箱逻辑 ==========
     
-    /// 判断是否应该触发装箱（基于其节点状态或 mask）
-    { p.ShouldPack(node) } -> std::convertible_to<bool>;
+    /**
+     * @brief 判断是否应该触发装箱
+     * @param nodeLog 节点日志上下文（包含 pendingCount 等状态）
+     * 
+     * Manager 在调用前会自动更新 log.pendingCount
+     */
+    { p.ShouldPack(nodeLog) } -> std::convertible_to<bool>;
     
-    /// 执行装箱动作（处理 node.results 中的数据）
-    { p.Pack(node) } -> std::same_as<void>;
+    /**
+     * @brief 执行装箱动作
+     * @param nodeLog 节点日志上下文
+     * @param results 待打包的结果列表（指针数组）
+     * 
+     * 管理器负责：
+     * 1. 原子性地标识待打包位
+     * 2. 收集结果指针
+     * 3. 传递给此函数进行持久化
+     */
+    { p.Pack(nodeLog, std::span<typename P::TaskResult*>{}) } -> std::same_as<void>;
 };
 
 /**
