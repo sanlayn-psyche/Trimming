@@ -29,6 +29,9 @@
 #include <stdint.h>
 #include <sstream>
 
+#include "ParallelManager.h"
+#include "TrimTaskPolicy.h"
+
 std::mutex __print_mutex;
 
 void __atomic_print(const std::string& message) 
@@ -957,116 +960,10 @@ bool TrimManager::act_combineWhileResolve()
 {
     init_resolve();
     int latest_processed_num = m_processedNum;
-    fouts.resize(8);
-    m_cvs_loc.resize(1, 0);
-    string namePrefix;
-    (*m_modelInfo)["Name"].get_to(namePrefix);
-    namePrefix = m_jsonRoot + namePrefix + "_";
-    fouts[0].open(namePrefix + "roots.bin", std::ios::binary);
-    fouts[1].open(namePrefix + "tree.bin", std::ios::binary);
-    fouts[2].open(namePrefix + "curveset.bin", std::ios::binary);
-    fouts[3].open(namePrefix + "curvedetail.bin", std::ios::binary);
 
-    fouts[4].open(namePrefix + "ctrl.bin", std::ios::binary);
-    fouts[5].open(namePrefix + "geom.bin", std::ios::binary);
-    fouts[6].open(namePrefix + "trim.bin", std::ios::binary);
-    fouts[7].open(namePrefix + "flag.bin", std::ios::binary);
-    std::vector<std::thread> worker_threads;
-    std::vector<std::unique_ptr<PatchProperty>> props;
-    // Dummy clocks
-    std::vector<std::unique_ptr<std::atomic<int64_t>>> worker_clocks;
-    int64_t init_clock = 0;
-
-    for (int tidx = 0; tidx < m_workerThreadCnt; tidx++)
-    {
-        props.emplace_back(std::make_unique<PatchProperty>());
-        props[tidx]->m_bezier_wise = 1;
-        props[tidx]->m_eval_ptr = std::make_shared<EvalDelegate_ls>();
-        props[tidx]->m_search_ptr = std::make_shared<SearchDelegate_GridBSP>();
-        props[tidx]->m_load_mode = 0;
-
-        worker_clocks.emplace_back(std::make_unique<std::atomic<int64_t>>(init_clock));
-
-        worker_threads.emplace_back(std::thread(TrimManager::act_resolveOne, this, worker_clocks[tidx].get(), props[tidx].get()));
-        
-        std::stringstream ss;
-        ss << "Create thread: id = " << worker_threads.back().get_id();
-        std::cout << ss.str() << std::endl;
-    }
-
-    while (m_processedNum < m_totalNumber)
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-
-        int current_processed_num = this->m_processedNum;
-        (*m_modelInfo)["ProcessedPatch"] = current_processed_num;
-
-        if (1000 <= (current_processed_num - latest_processed_num))
-        {
-            latest_processed_num = current_processed_num;
-            std::string debug_info = std::to_string(latest_processed_num) + " patches has been processed";
-            ::OutputDebugStringA(debug_info.c_str());
-            std::cout << debug_info << std::endl;
-        }
-
-        if (this->m_processedNum >= this->m_totalNumber)
-        {
-            std::cout << "Process finished!" << std::endl;
-            if (m_ifErrorDetected == true)
-            {
-                m_errorLog.close();
-                m_ifErrorDetected = false;
-            }
-            break;
-        }
-    }
-
-    for(auto &t : worker_threads) {
-        if(t.joinable()) t.join();
-    }
-    fouts[0].write((char*)m_data_array0.data(), m_data_array0.size() * 4);
-    fouts[1].write((char*)m_data_array1.data(), m_data_array1.size() * 4);
-    fouts[2].write((char*)m_data_array2.data(), m_data_array2.size() * 4);
-    fouts[3].write((char*)m_data_array3.data(), m_data_array3.size() * 4);
-    fouts[4].write((char*)m_data_array4.data(), m_data_array4.size() * 4);
-    fouts[5].write((char*)m_data_array5.data(), m_data_array5.size() * 4);
-    fouts[6].write((char*)m_data_array6.data(), m_data_array6.size() * 4);
-    fouts[7].write((char*)m_data_array7.data(), m_data_array7.size() * 4);
-    m_cvs_loc.pop_back();
-    fouts[4].write((char*)m_cvs_loc.data(), m_cvs_loc.size() * 4);
-    fouts[6].write((char*)m_nurbs_id.data(), m_nurbs_id.size() * 4);
-    for (auto& fout : fouts)fout.close();
-    (*m_modelInfo)["Name"].get_to(namePrefix);
-
-    (*m_modelInfo)["Trimming"]["Roots_Size"] = static_cast<int>(m_offset_roots * 4);
-    (*m_modelInfo)["Trimming"]["Tree_Size"] = static_cast<int>(m_offset_tree * 4);
-    (*m_modelInfo)["Trimming"]["CurveSet_Size"] = static_cast<int>(m_offset_curveset * 4);
-    (*m_modelInfo)["Trimming"]["CurveDetail_Size"] = static_cast<int>(m_offset_curvedetail * 4);
-
-    (*m_modelInfo)["Trimming"]["Roots"] = namePrefix + "_roots.bin";
-    (*m_modelInfo)["Trimming"]["Tree"] = namePrefix + "_tree.bin";
-    (*m_modelInfo)["Trimming"]["CurveSet"] = namePrefix + "_curveset.bin";
-    (*m_modelInfo)["Trimming"]["CurveDetail"] = namePrefix + "_curvedetail.bin";
-    (*m_modelInfo)["Trimming"]["Domain"] = namePrefix + "_domain.bin";
-
-    (*m_modelInfo)["Geometry"]["Trim"] = namePrefix + "_trim.bin";
-    (*m_modelInfo)["Geometry"]["Ctrl"] = namePrefix + "_ctrl.bin";
-    (*m_modelInfo)["Geometry"]["Geom"] = namePrefix + "_geom.bin";
-    (*m_modelInfo)["Geometry"]["Samp"] = namePrefix + "_samp.bin";
-    (*m_modelInfo)["Geometry"]["Flag"] = namePrefix + "_flag.bin";
-    (*m_modelInfo)["Geometry"]["BezierNum"] = m_bezier_cnt_total;
-
-    (*m_modelInfo)["MergedPatchNum"] = m_totalNumber;
-
-    std::cout << std::endl;
-    std::cout << "File merging finished!" << std::endl << std::endl;
-
-    std::cout << "#NURBS patch: " << m_totalNumber << std::endl;
-
-    //std::cout << "#NURBS patch with wrong trimming: " << mis_patch_cnt << std::endl << std::endl;
-
-    (*m_modelInfo)["Trimming"]["MergeDone"] = 1;
-    act_updataModleInfo();
+    parallel_merge::TrimTaskPolicy policy;
+    policy.SetTrimManager(this);
+    parallel_merge::ParallelManager::Run(policy, m_totalNumber, m_thread_num);
     return true;
 }
 

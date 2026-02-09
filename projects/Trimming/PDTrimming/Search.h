@@ -17,7 +17,7 @@ public:
 	virtual float get_dist(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate *eval) const = 0;
 	virtual int get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const = 0;
 
-	virtual void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) = 0;
+	virtual void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) const = 0;
 	SearchType m_type{ SearchType::__UNDEF };
 	
 protected:
@@ -45,7 +45,7 @@ protected:
 	void act_kd_refine(SpaceNode* node, int max_depth);
 	bool m_if_refine{ false };
 	void act_generate_default(vector<SpaceNode*>& roots) override;
-	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) override;
+	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) const override;
 };
 
 class SearchDelegate_KD : public SearchDelegate
@@ -60,7 +60,7 @@ public:
 	void set_leaf(CurveSet_LEAF& leaf) const override;
 	float get_dist(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override;
 	void act_generate_default(vector<SpaceNode*>& roots) override;
-	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) override;
+	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) const override;
 	int get_searchtime(const int* offset, const float* tree, const float* corse, const float* fine, float u, float v, const EvalDelegate* eval) const override;
 
 
@@ -113,7 +113,7 @@ public:
 	~SearchDelegate_GridBSP();
 	void act_generate_default(vector<SpaceNode*>& roots) override;
 	void act_generate(vector<SpaceNode*>& roots) override;
-	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) override;
+	void act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) const override;
 	int if_empty(int* root, float* tree);
 
 protected:

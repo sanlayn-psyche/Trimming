@@ -13,7 +13,8 @@
         "./PDTrimming/",
         "../../3rdparty/stb",
         "E:/Develop/Eigen/",
-        "E:\\Develop\\nlohmann"
+        "E:\\Develop\\nlohmann",
+        "../ParallelMerge/"
     ],
     "dependencies": [
         "E:\\Users\\sanlayn\\Source\\Repos\\3rdparty-vc14-64\\jemalloc-vc14-64",

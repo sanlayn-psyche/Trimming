@@ -8,6 +8,7 @@
 #include "TrimShared.h"
 #include "json.hpp"
 
+
 using std::string;
 using std::vector;
 class Patch;
@@ -47,6 +48,15 @@ public:
 	void get_memoryFootprintPatch_seg(string folderRoot, size_t pix_x, size_t pix_y);
 	int m_startId{ 0 };
 	PatchProperty m_patch_prop;
+
+	// json
+	nlohmann::json* m_modelInfo{nullptr};
+	nlohmann::json* m_config{ nullptr };
+	std::string m_jsonRoot{""};
+	std::string m_inputRoot{""};
+	std::string m_outputRoot{""};
+	int m_patchCntPerFolder{ 1000 };
+	int m_totalNumber{ 0 };
 private:
 	struct CombineInterface
 	{
@@ -60,9 +70,7 @@ private:
 
 	__make_tool_map<CombineInterface, GenerateType, CombineProxy> m_combine_proxy;
 
-	// json
-	nlohmann::json* m_modelInfo{nullptr};
-	nlohmann::json* m_config{ nullptr };
+
 	bool m_ifJsonLoaded{ false };
 
 	// runtime
@@ -74,12 +82,12 @@ private:
 	std::atomic<int> m_maxCurveOrder;
 	std::atomic<int> m_add_bezier_cnt;
 	std::atomic<int> m_culling_bezier_cnt;
-	int m_totalNumber{ 0 };
+
 	bool m_ifErrorDetected{ false };
 	int m_firstError{ 0 };
 
 	int m_generateMode{ 0 };
-	int m_patchCntPerFolder{ 1000 };
+
 	int m_threadHoldTime{ 10 };
 	int	m_workerThreadCnt{ 1 };
 
@@ -87,9 +95,7 @@ private:
 	vector<size_t> m_offsetTable;
 	std::ifstream m_model_data;
 	std::ofstream m_errorLog;
-	std::string m_jsonRoot{""};
-	std::string m_inputRoot{""};
-	std::string m_outputRoot{""};
+
 
 
 	// file test

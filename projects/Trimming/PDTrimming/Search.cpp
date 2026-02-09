@@ -133,7 +133,7 @@ void SearchDelegate_KD::act_generate_default(vector<SpaceNode*>& roots)
 {
 }
 
-void SearchDelegate_KD::act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs)
+void SearchDelegate_KD::act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) const
 {
     outputs[0].write((char*)(offsets.data() + 1), 12);
     datasize[0] = 3;
@@ -719,7 +719,7 @@ void SearchDelegate_GridBSP::act_generate(vector<SpaceNode*>& roots)
 
 
 
-void SearchDelegate_GridBSP::act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs)
+void SearchDelegate_GridBSP::act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) const
 {
     // offset table
     vector<int> corse_pos;
@@ -1524,7 +1524,7 @@ void SearchDelegate_BSP::act_generate_default(vector<SpaceNode*>& roots)
 
 
 
-void SearchDelegate_BSP::act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs)
+void SearchDelegate_BSP::act_merge_file(vector<int>& offsets, vector<int>& datasize, vector<std::ifstream>& inputs, vector<std::ofstream>& outputs) const
 {
 }
 
