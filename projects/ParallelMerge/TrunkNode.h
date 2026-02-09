@@ -53,6 +53,9 @@ struct TrunkNode {
     /// 工作线程根据 taskId % 64 直接存入对应槽位，无需锁竞争。
     std::array<std::optional<typename P::TaskResult>, kNodeCapacity> results;
 
+    /// 保护 nodeLog 的自旋锁
+    std::atomic_flag logLock = ATOMIC_FLAG_INIT;
+
     // ========== 构造与状态查询 ==========
     
     TrunkNode() = default;
@@ -60,6 +63,23 @@ struct TrunkNode {
     TrunkNode(uint32_t lvl, uint64_t idx, uint64_t target = ~0ULL)
         : targetMask(target), level(lvl), index(idx)
     {}
+
+    /**
+     * @brief 线程安全地更新日志
+     */
+    void UpdateLogSafe(const typename P::TaskLogNode& childLog, P& policy) {
+        while (logLock.test_and_set(std::memory_order_acquire)) {
+            // spin
+#if defined(__cpp_lib_atomic_wait)
+            logLock.wait(true, std::memory_order_relaxed);
+#endif
+        }
+        policy.UpdateLog(nodeLog, childLog);
+        logLock.clear(std::memory_order_release);
+#if defined(__cpp_lib_atomic_wait)
+        logLock.notify_one();
+#endif
+    }
     
     /// 检查节点所有任务是否已处理完成
     [[nodiscard]] bool IsComplete() const noexcept {

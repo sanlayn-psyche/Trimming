@@ -127,7 +127,7 @@ private:
             if (policy.ShouldPack(currentL0Node->nodeLog) || nodeComplete) {
                 ExecutePacking(policy, currentL0Node);
                 if (nodeComplete) {
-                    ReportCompletionUpward(currentL0Node, localStack);
+                    ReportCompletionUpward(currentL0Node, localStack, policy);
                     currentL0Node = nullptr;
                     currentL0Index = UINT64_MAX;
                 }
@@ -177,17 +177,75 @@ private:
         // Implementation for partial sync if needed
     }
 
-    void ReportCompletionUpward(NodeType* completedNode, std::vector<LocalNodeEntry<P>>& stack) {
+    /**
+     * @brief 级联装箱：从当前节点递归向下触发装箱
+     */
+    void RecursivePack(P& policy, NodeType* node) {
+        if (node->IsLeafLevel()) {
+            // L0 节点：直接执行物理装箱
+            ExecutePacking(policy, node);
+        } else {
+            // 中间节点：遍历所有"已完成但未打包"的子节点
+            uint64_t pendingMask = node->GetToBePackedMask();
+            while (pendingMask) {
+                // 取出最低位的 1
+                int i = std::countr_zero(pendingMask);
+                uint64_t bit = 1ULL << i;
+                
+                uint32_t childLevel = node->level - 1;
+                uint64_t childIndex = node->index * kNodeCapacity + i;
+                
+                // 获取子节点（理论上必然存在，因为 mask 位已置）
+                NodeType* child = trunkManager_.GetOrCreate(childLevel, childIndex);
+                
+                // 递归处理子节点
+                RecursivePack(policy, child);
+                
+                // 标记本层对应项已打包
+                node->MarkPacked(bit);
+                
+                // 清除该位，继续下一位 (pendingMask &= ~bit 也可以)
+                pendingMask &= (pendingMask - 1);
+            }
+        }
+    }
+
+    void ReportCompletionUpward(NodeType* completedNode, std::vector<LocalNodeEntry<P>>& stack, P& policy) {
+        // 先确保本节点（L0）的日志更新正确（虽然 WorkerLoop 里通常已经更新了 pendingCount，但 pendingBytes 还没聚合？）
+        // 其实 WorkerLoop 里只是更新了 L0 的 pendingCount。pendingBytes 已经在 SetResult 后由 Policy.Update 维护了吗？
+        
         uint32_t level = completedNode->level;
         uint64_t nodeIndex = completedNode->index;
+        NodeType* child = completedNode;
+
         while (level < trunkManager_.GetMaxLevel()) {
             uint32_t parentLevel = level + 1;
             uint64_t parentIndex = nodeIndex / kNodeCapacity;
             uint32_t bitInParent = static_cast<uint32_t>(nodeIndex % kNodeCapacity);
+            
             NodeType* parent = trunkManager_.GetOrCreate(parentLevel, parentIndex);
-            if (!parent->ReportAndCheckComplete(bitInParent)) break;
+            
+            // 1. 原子聚合日志 (Hierarchical Aggregation)
+            parent->UpdateLogSafe(child->nodeLog, policy);
+             
+            if (!parent->ReportAndCheckComplete(bitInParent)) {
+                // 父节点未全满，但可能触发打包阈值
+                if (policy.ShouldPack(parent->nodeLog)) {
+                    RecursivePack(policy, parent);
+                }
+                break;
+            }
+            
+            // 如果父节点也满了，继续向上
+            // 即使满了，也再检查一次是否需要打包 (可能正好满的阈值也触发了打包)
+            if (policy.ShouldPack(parent->nodeLog)) {
+                RecursivePack(policy, parent);
+            }
+
             level = parentLevel;
             nodeIndex = parentIndex;
+            child = parent;
+            
             if (level == trunkManager_.GetMaxLevel()) {
                 if (!finalized_.exchange(true, std::memory_order_acq_rel)) {
                     P::OnFinalize();

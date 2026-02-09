@@ -83,6 +83,15 @@ concept ParallelTaskPolicy = requires(
     { p.ShouldPack(nodeLog) } -> std::convertible_to<bool>;
     
     /**
+     * @brief 更新父节点日志
+     * @param parentLog 父节点日志
+     * @param childLog 子节点日志
+     * 
+     * 用于层级聚合，通常是将 child 的 pendingCount/Bytes 累加到 parent
+     */
+    { p.UpdateLog(nodeLog, nodeLog) } -> std::same_as<void>;
+    
+    /**
      * @brief 执行装箱动作
      * @param nodeLog 节点日志上下文
      * @param results 待打包的结果列表（指针数组）

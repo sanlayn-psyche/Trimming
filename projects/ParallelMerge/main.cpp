@@ -36,7 +36,8 @@ struct TestPolicy {
 
     struct TaskLogNode {
         uint64_t totalDataSize{0};
-        uint64_t pendingCount{0};  // 待打包任务数（由 Manager 自动更新）
+        uint64_t pendingCount{0};  
+        uint64_t pendingBytes{0};  // 新增：待打包数据量
     };
 
     // 静态成员用于跨线程访问存储（仅用于测试）
@@ -83,16 +84,22 @@ struct TestPolicy {
         // 生成变长数据：随机长度 100-200 字节
         size_t len = 100 + (id % 101);
         result.data.resize(len);
-        for (size_t i = 0; i < len; ++i) {
-            result.data[i] = static_cast<char>((id + i) % 256);
-        }
-        
+        // ...
         return result;
     }
 
     TaskLogNode& Update(TaskLogNode& log) {
         return log;
     }
+
+    // 新增：层级聚合逻辑
+    void UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
+        parent.pendingCount += child.pendingCount;
+        parent.pendingBytes += child.pendingBytes;
+        parent.totalDataSize += child.totalDataSize;
+    }
+    
+    // ...
 
     void SerializeRecord(void* slot, const TaskResult& result) {
         if (slot) {
@@ -105,7 +112,8 @@ struct TestPolicy {
 
     // 简化签名：只依赖 Log 状态
     bool ShouldPack(const TaskLogNode& log) {
-        return log.pendingCount >= 8; 
+        // 自适应策略：8个任务 或 2KB 就打包
+        return log.pendingCount >= 8 || log.pendingBytes >= 2048; 
     }
 
     // New decoupled signature: receives raw results
