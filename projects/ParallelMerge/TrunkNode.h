@@ -30,18 +30,14 @@ constexpr uint32_t kNodeCapacity = 64;
  */
 template<typename P>
 struct TrunkNode {
-    /// 处理完成位掩码：由工作线程在完成任务后设置
+
     std::atomic<uint64_t> mask{0};
-    
-    /// 已打包位掩码：由 Pack() 逻辑设置，追踪已落盘的任务
     std::atomic<uint64_t> packedMask{0};
-    
-    /// 目标掩码
     uint64_t targetMask{~0ULL};
-    
+
     /// 节点所属层级
     uint32_t level{0};
-    
+
     /// 节点索引
     uint64_t index{0};
     
@@ -63,6 +59,13 @@ struct TrunkNode {
     TrunkNode(uint32_t lvl, uint64_t idx, uint64_t target = ~0ULL)
         : targetMask(target), level(lvl), index(idx)
     {}
+
+    TrunkNode CreateLocalLog() const {
+        TrunkNode res(level, index, targetMask);
+        //res.packedMask.store(packedMask.load(std::memory_order_acquire), std::memory_order_relaxed);
+        //res.mask.store(mask.load(std::memory_order_acquire), std::memory_order_relaxed);
+        return res;
+    }
 
     /**
      * @brief 线程安全地更新日志
@@ -168,19 +171,6 @@ struct TrunkNode {
     [[nodiscard]] uint32_t GetBitInParent() const noexcept {
         return static_cast<uint32_t>(index % kNodeCapacity);
     }
-};
-
-/**
- * @brief 线程本地的节点栈条目
- * 
- * 线程持有一个栈式结构追踪当前维护的各层级节点
- */
-template<typename P>
-struct LocalNodeEntry {
-    uint64_t key;
-    TrunkNode<P>* node;
-    
-    LocalNodeEntry(uint64_t k, TrunkNode<P>* n) : key(k), node(n) {}
 };
 
 } // namespace parallel_merge

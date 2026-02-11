@@ -22,6 +22,7 @@
 #include <functional>
 #include <optional>
 #include <bit>
+#include <deque>
 
 namespace parallel_merge {
 
@@ -48,221 +49,242 @@ namespace parallel_merge {
  */
 template<ParallelTaskPolicy P>
 class ParallelExecutor {
-public:
+
+protected:
     using NodeType = TrunkNode<P>;
     using ManagerType = TrunkManager<P>;
-    
+    uint64_t totalTasks_{0};
+    size_t threadCount_{0};
+    std::atomic<uint64_t> taskIdCounter_{0};
+    std::atomic<uint64_t> completedTasks_{0};
+    typename P::TaskLogGlobal globalLog_{};
+    ManagerType trunkManager_;
+
+public:
     ParallelExecutor() = default;
     ~ParallelExecutor() = default;
     
     ParallelExecutor(const ParallelExecutor&) = delete;
     ParallelExecutor& operator=(const ParallelExecutor&) = delete;
 
-    void Initialize(uint64_t totalTasks, size_t threadCount = 0) {
-        totalTasks_ = totalTasks;
-        if (threadCount == 0) {
-            threadCount = std::thread::hardware_concurrency();
-            if (threadCount == 0) threadCount = 4;
-        }
-        threadCount_ = threadCount;
-        taskIdCounter_.store(0, std::memory_order_relaxed);
-        completedTasks_.store(0, std::memory_order_relaxed);
-        finalized_.store(false, std::memory_order_relaxed);
-        trunkManager_.Initialize(totalTasks, threadCount);
-    }
-    
-    void Run(P& policy) {
-        globalLog_ = P::OnInit();
-        std::vector<std::thread> workers;
-        workers.reserve(threadCount_);
-        for (size_t i = 0; i < threadCount_; ++i) {
-            workers.emplace_back([this, &policy, i]() {
-                WorkerLoop(policy, i);
-            });
-        }
-        for (auto& worker : workers) {
-            worker.join();
-        }
-        if (!finalized_.exchange(true, std::memory_order_acq_rel)) {
-            P::OnFinalize();
-        }
-    }
-    
-    [[nodiscard]] uint64_t GetCompletedTasks() const noexcept {
-        return completedTasks_.load(std::memory_order_acquire);
-    }
+    bool Initialize(uint64_t totalTasks, size_t threadCount = 0);
+    void Run(P& policy);
+    [[nodiscard]] uint64_t GetCompletedTasks() const noexcept { return completedTasks_.load(std::memory_order_acquire);}
 
 private:
-    void WorkerLoop(P& policy, size_t threadId) {
-        std::vector<LocalNodeEntry<P>> localStack;
-        localStack.reserve(trunkManager_.GetMaxLevel() + 1);
-        NodeType* currentL0Node = nullptr;
-        uint64_t currentL0Index = UINT64_MAX;
-        
-        while (true) {
-            uint64_t taskId = taskIdCounter_.fetch_add(1, std::memory_order_acq_rel);
-            if (taskId >= totalTasks_) break;
-            
-            uint64_t l0NodeIndex = taskId / kNodeCapacity;
-            uint32_t bitIndex = static_cast<uint32_t>(taskId % kNodeCapacity);
-            
-            if (l0NodeIndex != currentL0Index) {
-                if (currentL0Node) SyncToParent(currentL0Node, localStack);
-                currentL0Node = trunkManager_.GetOrCreate(0, l0NodeIndex);
-                currentL0Index = l0NodeIndex;
-                UpdateLocalStack(localStack, currentL0Node);
-            }
-            
-            auto result = policy.Process(taskId);
-            currentL0Node->SetResult(bitIndex, std::move(result));
-            policy.Update(currentL0Node->nodeLog);
-            
-            bool nodeComplete = currentL0Node->ReportAndCheckComplete(bitIndex);
-            completedTasks_.fetch_add(1, std::memory_order_acq_rel);
-            
-            // 更新 log.pendingCount（Manager 职责）
-            uint64_t readyMask = currentL0Node->GetToBePackedMask();
-            currentL0Node->nodeLog.pendingCount = std::popcount(readyMask);
+    void WorkerLoop(P& policy, size_t threadId);
+    void ExecutePacking(P& policy, NodeType* node);
+    void UpdateLog(NodeType& local, NodeType* remote);
+    void SyncToParent(NodeType* node, std::vector<LocalNodeEntry<P>>& stack) {};
+    void RecursivePack(P& policy, NodeType* node);
+    void ReportCompletionUpward(NodeType* completedNode, std::vector<LocalNodeEntry<P>>& stack, P& policy);
+};
 
-            if (policy.ShouldPack(currentL0Node->nodeLog) || nodeComplete) {
-                ExecutePacking(policy, currentL0Node);
-                if (nodeComplete) {
-                    ReportCompletionUpward(currentL0Node, localStack, policy);
-                    currentL0Node = nullptr;
-                    currentL0Index = UINT64_MAX;
-                }
-            }
+
+
+template<ParallelTaskPolicy P>
+inline bool ParallelExecutor<P>::Initialize(uint64_t totalTasks, size_t threadCount) {
+
+    totalTasks_ = totalTasks;
+    if (threadCount == 0) {
+        return false;
+    }
+    threadCount_ = threadCount;
+    taskIdCounter_.store(0, std::memory_order_relaxed);
+    completedTasks_.store(0, std::memory_order_relaxed);
+    trunkManager_.Initialize(totalTasks, threadCount);
+    return true;
+}
+
+template<ParallelTaskPolicy P>
+inline void ParallelExecutor<P>::Run(P &policy)
+{
+    globalLog_ = P::OnInit();
+    std::vector<std::thread> workers;
+    workers.reserve(threadCount_);
+    for (size_t i = 0; i < threadCount_; ++i) {
+        workers.emplace_back([this, &policy, i]() {
+            WorkerLoop(policy, i);
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+}
+
+template<ParallelTaskPolicy P>
+inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
+
+    std::vector<NodeType*> remoteLog;
+    std::vector<NodeType> localLog;
+    remoteLog.resize(trunkManager_.GetMaxLevel() + 1);
+    localLog.resize(trunkManager_.GetMaxLevel() + 1);
+
+    for (uint32_t level = 0; level <= trunkManager_.GetMaxLevel(); ++level) {
+        remoteLog[level] = trunkManager_.GetOrCreate(level, 0);
+        localLog[level] = remoteLog[level]->CreateLocalLog();
+    }
+
+    while (true) {
+
+        uint64_t taskId = taskIdCounter_.fetch_add(1, std::memory_order_acq_rel);
+
+        if (taskId >= totalTasks_) {
+            // 要把本地记录同步到上层；
+            break;
         }
-        if (currentL0Node) SyncToParent(currentL0Node, localStack);
-    }
+        auto result = policy.Process(taskId);
 
-    void ExecutePacking(P& policy, NodeType* node) {
-        // 1. 获取本次需要搬运的位 (Manager 负责状态管理)
-        uint64_t toBePacked = node->GetToBePackedMask();
-        if (toBePacked == 0) return;
+        // index 变化，换表；
+        // 必须换了表才能记录结果;
+        uint64_t trunkID = taskId;
+        for (uint32_t level = 0; level <= trunkManager_.GetMaxLevel(); ++level) {
 
-        // 2. 原子标记这些位已进入打包流程
-        node->MarkPacked(toBePacked);
-
-        // 3. 收集结果指针 (Manager 负责聚合数据)
-        std::vector<typename P::TaskResult*> results;
-        results.reserve(64);
-        for (uint32_t i = 0; i < 64; ++i) {
-            if ((toBePacked >> i) & 1) {
-                if (node->results[i].has_value()) {
-                    results.push_back(&(*node->results[i]));
-                }
+            trunkID = trunkID / kNodeCapacity;
+            uint64_t finishBit = 0x1 << static_cast<uint32_t>(taskId % kNodeCapacity);
+            if (trunkID != localLog[level].index) {
+                UpdateLog(localLog[level], remoteLog[level]);
+                remoteLog[level] = trunkManager_.GetOrCreate(level, trunkID);
+                localLog[level] = remoteLog[level]->CreateLocalLog();
             }
+
         }
 
-        if (results.empty()) return;
 
-        // 4. 调用策略执行落盘 (Policy 负责具体处理)
-        policy.Pack(node->nodeLog, results);
-    }
+        currentL0Node->SetResult(bitIndex, std::move(result));
+        policy.Update(currentL0Node->nodeLog);
 
-    void UpdateLocalStack(std::vector<LocalNodeEntry<P>>& stack, NodeType* l0Node) {
-        stack.clear();
-        stack.emplace_back(l0Node->GetKey(), l0Node);
-        NodeType* current = l0Node;
-        for (uint32_t level = 1; level <= trunkManager_.GetMaxLevel(); ++level) {
-            uint64_t parentIndex = current->index / kNodeCapacity;
-            NodeType* parent = trunkManager_.GetOrCreate(level, parentIndex);
-            stack.emplace_back(parent->GetKey(), parent);
-            current = parent;
-        }
-    }
+        bool nodeComplete = currentL0Node->ReportAndCheckComplete(bitIndex);
+        completedTasks_.fetch_add(1, std::memory_order_acq_rel);
 
-    void SyncToParent(NodeType* node, std::vector<LocalNodeEntry<P>>& stack) {
-        // Implementation for partial sync if needed
-    }
+        // 更新 log.pendingCount（Manager 职责）
+        uint64_t readyMask = currentL0Node->GetToBePackedMask();
+        currentL0Node->nodeLog.pendingCount = std::popcount(readyMask);
 
-    /**
-     * @brief 级联装箱：从当前节点递归向下触发装箱
-     */
-    void RecursivePack(P& policy, NodeType* node) {
-        if (node->IsLeafLevel()) {
-            // L0 节点：直接执行物理装箱
-            ExecutePacking(policy, node);
-        } else {
-            // 中间节点：遍历所有"已完成但未打包"的子节点
-            uint64_t pendingMask = node->GetToBePackedMask();
-            while (pendingMask) {
-                // 取出最低位的 1
-                int i = std::countr_zero(pendingMask);
-                uint64_t bit = 1ULL << i;
-                
-                uint32_t childLevel = node->level - 1;
-                uint64_t childIndex = node->index * kNodeCapacity + i;
-                
-                // 获取子节点（理论上必然存在，因为 mask 位已置）
-                NodeType* child = trunkManager_.GetOrCreate(childLevel, childIndex);
-                
-                // 递归处理子节点
-                RecursivePack(policy, child);
-                
-                // 标记本层对应项已打包
-                node->MarkPacked(bit);
-                
-                // 清除该位，继续下一位 (pendingMask &= ~bit 也可以)
-                pendingMask &= (pendingMask - 1);
+        if (policy.ShouldPack(currentL0Node->nodeLog) || nodeComplete) {
+            ExecutePacking(policy, currentL0Node);
+            if (nodeComplete) {
+                ReportCompletionUpward(currentL0Node, localStack, policy);
+                currentL0Node = nullptr;
+                currentL0Index = UINT64_MAX;
             }
         }
     }
+    if (currentL0Node) SyncToParent(currentL0Node, localStack);
+}
 
-    void ReportCompletionUpward(NodeType* completedNode, std::vector<LocalNodeEntry<P>>& stack, P& policy) {
-        // 先确保本节点（L0）的日志更新正确（虽然 WorkerLoop 里通常已经更新了 pendingCount，但 pendingBytes 还没聚合？）
-        // 其实 WorkerLoop 里只是更新了 L0 的 pendingCount。pendingBytes 已经在 SetResult 后由 Policy.Update 维护了吗？
-        
-        uint32_t level = completedNode->level;
-        uint64_t nodeIndex = completedNode->index;
-        NodeType* child = completedNode;
+template<ParallelTaskPolicy P>
+inline void ParallelExecutor<P>::ExecutePacking(P &policy, NodeType *node)  {
+    // 1. 获取本次需要搬运的位 (Manager 负责状态管理)
+    uint64_t toBePacked = node->GetToBePackedMask();
+    if (toBePacked == 0) return;
 
-        while (level < trunkManager_.GetMaxLevel()) {
-            uint32_t parentLevel = level + 1;
-            uint64_t parentIndex = nodeIndex / kNodeCapacity;
-            uint32_t bitInParent = static_cast<uint32_t>(nodeIndex % kNodeCapacity);
-            
-            NodeType* parent = trunkManager_.GetOrCreate(parentLevel, parentIndex);
-            
-            // 1. 原子聚合日志 (Hierarchical Aggregation)
-            parent->UpdateLogSafe(child->nodeLog, policy);
-             
-            if (!parent->ReportAndCheckComplete(bitInParent)) {
-                // 父节点未全满，但可能触发打包阈值
-                if (policy.ShouldPack(parent->nodeLog)) {
-                    RecursivePack(policy, parent);
-                }
-                break;
+    // 2. 原子标记这些位已进入打包流程
+    node->MarkPacked(toBePacked);
+
+    // 3. 收集结果指针 (Manager 负责聚合数据)
+    std::vector<typename P::TaskResult*> results;
+    results.reserve(64);
+    for (uint32_t i = 0; i < 64; ++i) {
+        if ((toBePacked >> i) & 1) {
+            if (node->results[i].has_value()) {
+                results.push_back(&(*node->results[i]));
             }
-            
-            // 如果父节点也满了，继续向上
-            // 即使满了，也再检查一次是否需要打包 (可能正好满的阈值也触发了打包)
+        }
+    }
+
+    if (results.empty()) return;
+
+    // 4. 调用策略执行落盘 (Policy 负责具体处理)
+    policy.Pack(node->nodeLog, results);
+}
+
+template<ParallelTaskPolicy P>
+inline void ParallelExecutor<P>::UpdateLocalStack(std::vector<LocalNodeEntry<P>> &stack, NodeType *l0Node) {
+    stack.clear();
+    stack.emplace_back(l0Node->GetKey(), l0Node);
+    NodeType* current = l0Node;
+    for (uint32_t level = 1; level <= trunkManager_.GetMaxLevel(); ++level) {
+        uint64_t parentIndex = current->index / kNodeCapacity;
+        NodeType* parent = trunkManager_.GetOrCreate(level, parentIndex);
+        stack.emplace_back(parent->GetKey(), parent);
+        current = parent;
+    }
+}
+
+template<ParallelTaskPolicy P>
+inline void ParallelExecutor<P>::RecursivePack(P &policy, NodeType *node) {
+    if (node->IsLeafLevel()) {
+        // L0 节点：直接执行物理装箱
+        ExecutePacking(policy, node);
+    } else {
+        // 中间节点：遍历所有"已完成但未打包"的子节点
+        uint64_t pendingMask = node->GetToBePackedMask();
+        while (pendingMask) {
+            // 取出最低位的 1
+            int i = std::countr_zero(pendingMask);
+            uint64_t bit = 1ULL << i;
+
+            uint32_t childLevel = node->level - 1;
+            uint64_t childIndex = node->index * kNodeCapacity + i;
+
+            // 获取子节点（理论上必然存在，因为 mask 位已置）
+            NodeType* child = trunkManager_.GetOrCreate(childLevel, childIndex);
+
+            // 递归处理子节点
+            RecursivePack(policy, child);
+
+            // 标记本层对应项已打包
+            node->MarkPacked(bit);
+
+            // 清除该位，继续下一位 (pendingMask &= ~bit 也可以)
+            pendingMask &= (pendingMask - 1);
+        }
+    }
+}
+
+template<ParallelTaskPolicy P>
+inline void ParallelExecutor<P>::ReportCompletionUpward(NodeType *completedNode, std::vector<LocalNodeEntry<P>> &stack, P &policy) {
+    // 先确保本节点（L0）的日志更新正确（虽然 WorkerLoop 里通常已经更新了 pendingCount，但 pendingBytes 还没聚合？）
+    // 其实 WorkerLoop 里只是更新了 L0 的 pendingCount。pendingBytes 已经在 SetResult 后由 Policy.Update 维护了吗？
+
+    uint32_t level = completedNode->level;
+    uint64_t nodeIndex = completedNode->index;
+    NodeType* child = completedNode;
+
+    while (level < trunkManager_.GetMaxLevel()) {
+        uint32_t parentLevel = level + 1;
+        uint64_t parentIndex = nodeIndex / kNodeCapacity;
+        uint32_t bitInParent = static_cast<uint32_t>(nodeIndex % kNodeCapacity);
+
+        NodeType* parent = trunkManager_.GetOrCreate(parentLevel, parentIndex);
+
+        // 1. 原子聚合日志 (Hierarchical Aggregation)
+        parent->UpdateLogSafe(child->nodeLog, policy);
+
+        if (!parent->ReportAndCheckComplete(bitInParent)) {
+            // 父节点未全满，但可能触发打包阈值
             if (policy.ShouldPack(parent->nodeLog)) {
                 RecursivePack(policy, parent);
             }
+            break;
+        }
 
-            level = parentLevel;
-            nodeIndex = parentIndex;
-            child = parent;
-            
-            if (level == trunkManager_.GetMaxLevel()) {
-                if (!finalized_.exchange(true, std::memory_order_acq_rel)) {
-                    P::OnFinalize();
-                }
-                break;
-            }
+        // 如果父节点也满了，继续向上
+        // 即使满了，也再检查一次是否需要打包 (可能正好满的阈值也触发了打包)
+        if (policy.ShouldPack(parent->nodeLog)) {
+            RecursivePack(policy, parent);
+        }
+
+        level = parentLevel;
+        nodeIndex = parentIndex;
+        child = parent;
+
+        if (level == trunkManager_.GetMaxLevel()) {
+            break;
         }
     }
-
-    uint64_t totalTasks_{0};
-    size_t threadCount_{0};
-    std::atomic<uint64_t> taskIdCounter_{0};
-    std::atomic<uint64_t> completedTasks_{0};
-    std::atomic<bool> finalized_{false};
-    typename P::TaskLogGlobal globalLog_{};
-    ManagerType trunkManager_;
-};
+}
 
 /**
  * @brief 框架入口点 (Static Helper)
@@ -279,8 +301,9 @@ struct ParallelManager {
     template<ParallelTaskPolicy P>
     static void Run(P& policy, uint64_t totalTasks, size_t threadCount = 0) {
         ParallelExecutor<P> executor;
-        executor.Initialize(totalTasks, threadCount);
-        executor.Run(policy);
+        if (executor.Initialize(totalTasks, threadCount)) {
+            executor.Run(policy);
+        }
     }
     
     // 如果需要更细粒度的控制，用户仍可以使用 ParallelExecutor<P> 直接操作
