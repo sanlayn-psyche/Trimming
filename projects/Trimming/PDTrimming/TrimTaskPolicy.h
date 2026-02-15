@@ -250,7 +250,7 @@ struct TrimTaskPolicy {
         return log;
     }
 
-    void UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
+    TaskLogNode UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
         parent.pendingCount += child.pendingCount;
         parent.pendingBytes += child.pendingBytes;
     }

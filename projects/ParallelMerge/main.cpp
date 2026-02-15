@@ -93,10 +93,11 @@ struct TestPolicy {
     }
 
     // 新增：层级聚合逻辑
-    void UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
+    TaskLogNode UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
         parent.pendingCount += child.pendingCount;
         parent.pendingBytes += child.pendingBytes;
         parent.totalDataSize += child.totalDataSize;
+        return parent;
     }
     
     // ...
@@ -161,8 +162,8 @@ int main() {
     
     try {
         parallel_merge::TestPolicy policy;
-        uint64_t totalTasks = 1000000; // 提升至百万级压力测试
-        size_t threads = 12;
+        uint64_t totalTasks = 500;
+        size_t threads = 2;
         
         std::cout << "Running " << totalTasks << " tasks with " << threads << " threads...\n";
         

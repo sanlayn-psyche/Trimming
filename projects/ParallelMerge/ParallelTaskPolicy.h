@@ -89,7 +89,7 @@ concept ParallelTaskPolicy = requires(
      * 
      * 用于层级聚合，通常是将 child 的 pendingCount/Bytes 累加到 parent
      */
-    { p.UpdateLog(nodeLog, nodeLog) } -> std::same_as<void>;
+    { p.UpdateLog(nodeLog, nodeLog) } -> std::same_as<typename P::TaskLogNode>;
     
     /**
      * @brief 执行装箱动作

@@ -31,6 +31,7 @@ constexpr uint32_t kNodeCapacity = 64;
 template<typename P>
 struct TrunkNode {
 
+
     std::atomic<uint64_t> mask{0};
     std::atomic<uint64_t> packedMask{0};
     uint64_t targetMask{~0ULL};
@@ -60,28 +61,50 @@ struct TrunkNode {
         : targetMask(target), level(lvl), index(idx)
     {}
 
+    TrunkNode& operator = (TrunkNode&& other)
+    {
+        level = other.level;
+        index = other.index;
+        targetMask = other.targetMask;
+        results = std::move(other.results);
+        mask = other.mask.load(std::memory_order_relaxed);
+        packedMask = other.packedMask.load(std::memory_order_relaxed);
+        return *this;
+    }
+
+    TrunkNode(TrunkNode&& other)
+    {
+        level = other.level;
+        index = other.index;
+        targetMask = other.targetMask;
+        results = std::move(other.results);
+        mask = other.mask.load(std::memory_order_relaxed);
+        packedMask = other.packedMask.load(std::memory_order_relaxed);
+    }
+
+
     TrunkNode CreateLocalLog() const {
-        TrunkNode res(level, index, targetMask);
         //res.packedMask.store(packedMask.load(std::memory_order_acquire), std::memory_order_relaxed);
         //res.mask.store(mask.load(std::memory_order_acquire), std::memory_order_relaxed);
-        return res;
+        return TrunkNode{level, index, targetMask};
     }
 
     /**
      * @brief 线程安全地更新日志
      */
-    void UpdateLogSafe(const typename P::TaskLogNode& childLog, P& policy) {
+    P::TaskLogNode UpdateLogSafe(const typename P::TaskLogNode& childLog, P& policy) {
         while (logLock.test_and_set(std::memory_order_acquire)) {
             // spin
 #if defined(__cpp_lib_atomic_wait)
             logLock.wait(true, std::memory_order_relaxed);
 #endif
         }
-        policy.UpdateLog(nodeLog, childLog);
+        auto res = policy.UpdateLog(nodeLog, childLog);
         logLock.clear(std::memory_order_release);
 #if defined(__cpp_lib_atomic_wait)
         logLock.notify_one();
 #endif
+        return res;
     }
     
     /// 检查节点所有任务是否已处理完成
@@ -118,13 +141,12 @@ struct TrunkNode {
         packedMask.fetch_or(bitMask, std::memory_order_acq_rel);
     }
 
-    uint64_t ReportCompletion(uint32_t bitIndex) noexcept {
-        const uint64_t bit = 1ULL << bitIndex;
-        return mask.fetch_or(bit, std::memory_order_acq_rel) | bit;
+    uint64_t ReportCompletion(uint64_t bitMask) noexcept {
+        return mask.fetch_or(bitMask, std::memory_order_acq_rel) | bitMask;
     }
     
-    bool ReportAndCheckComplete(uint32_t bitIndex) noexcept {
-        const uint64_t newMask = ReportCompletion(bitIndex);
+    bool ReportAndCheckComplete(uint64_t bitMask) noexcept {
+        const uint64_t newMask = ReportCompletion(bitMask);
         return newMask == targetMask;
     }
     
