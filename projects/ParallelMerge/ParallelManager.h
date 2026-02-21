@@ -156,9 +156,9 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
 
         if (taskId < totalTasks_)
         {
-            auto result = policy.Process(taskId);
+            auto result = policy.Process(taskId, localLog[0].nodeLog);
             auto loc = taskId % kNodeCapacity;
-            localLog[0].mask.fetch_or(0x1 << static_cast<uint32_t>(loc));
+            localLog[0].mask.fetch_or(1ull << loc);
             localLog[0].results[loc] = result;
         }
         else

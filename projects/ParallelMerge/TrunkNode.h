@@ -23,7 +23,7 @@
 namespace parallel_merge {
 
 /// 每个节点的最大子任务/子节点数量
-constexpr uint32_t kNodeCapacity = 64;
+constexpr uint64_t kNodeCapacity = 64;
 
 /**
  * @brief 层次化树节点

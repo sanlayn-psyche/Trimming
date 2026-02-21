@@ -56,13 +56,9 @@ concept ParallelTaskPolicy = requires(
 
     // ========== 3. 核心处理逻辑 ==========
     
-    /// 输入任务 ID，输出处理结果
-    { p.Process(id) } -> std::same_as<typename P::TaskResult>;
+    /// 输入任务 ID，输出处理结果, 更新本地任务记录
+    { p.Process(id, nodeLog) } -> std::same_as<typename P::TaskResult>;
 
-    // ========== 4. 节点任务记录更新 ==========
-    
-    /// 更新节点的任务记录状态
-    { p.Update(nodeLog) } -> std::same_as<typename P::TaskLogNode&>;
 
     // ========== 5. 序列化行为 ==========
     

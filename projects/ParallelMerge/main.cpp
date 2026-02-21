@@ -77,7 +77,7 @@ struct TestPolicy {
         std::cout << "[TestPolicy] Finalized and storage closed.\n";
     }
 
-    TaskResult Process(uint64_t id) {
+    TaskResult Process(uint64_t id, TaskLogNode& localLog) {
         TaskResult result;
         result.taskId = id;
         
@@ -85,6 +85,7 @@ struct TestPolicy {
         size_t len = 100 + (id % 101);
         result.data.resize(len);
         // ...
+        localLog.pendingBytes += len;
         return result;
     }
 
