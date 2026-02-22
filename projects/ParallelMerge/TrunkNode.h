@@ -18,6 +18,7 @@
 #include <memory>
 
 #include <array>
+#include <mutex>
 #include <optional>
 
 namespace parallel_merge {
@@ -31,14 +32,13 @@ constexpr uint64_t kNodeCapacity = 64;
 template<typename P>
 struct TrunkNode {
 
-
     std::atomic<uint64_t> mask{0};
     std::atomic<uint64_t> packedMask{0};
     uint64_t targetMask{~0ULL};
+     std::atomic<bool> packingToken { false };
 
     /// 节点所属层级
     uint32_t level{0};
-
     /// 节点索引
     uint64_t index{0};
     
@@ -92,19 +92,35 @@ struct TrunkNode {
     /**
      * @brief 线程安全地更新日志
      */
-    P::TaskLogNode UpdateLogSafe(const typename P::TaskLogNode& childLog, P& policy) {
+
+    void WaitLogLock()
+    {
         while (logLock.test_and_set(std::memory_order_acquire)) {
             // spin
 #if defined(__cpp_lib_atomic_wait)
             logLock.wait(true, std::memory_order_relaxed);
 #endif
         }
-        auto res = policy.UpdateLog(nodeLog, childLog);
+    }
+
+    void RealeaseLogLock()
+    {
         logLock.clear(std::memory_order_release);
 #if defined(__cpp_lib_atomic_wait)
         logLock.notify_one();
 #endif
+    }
+
+    uint64_t TryPacking(const typename P::TaskLogNode& childLog, P& policy) {
+
+
+
         return res;
+    }
+
+    void ResetLog()
+    {
+        nodeLog = P::TaskLogNode();
     }
     
     /// 检查节点所有任务是否已处理完成

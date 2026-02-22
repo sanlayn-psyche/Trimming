@@ -31,7 +31,8 @@ concept ParallelTaskPolicy = requires(
     P p,
     uint64_t id,
     typename P::TaskResult result,
-    typename P::TaskLogNode& nodeLog,
+    typename P::TaskLogNode nodeLog,
+    typename P::TaskLogGlobal globalLog,
     void* slot,
     std::ostream& os
 ) {
@@ -59,14 +60,7 @@ concept ParallelTaskPolicy = requires(
     /// 输入任务 ID，输出处理结果, 更新本地任务记录
     { p.Process(id, nodeLog) } -> std::same_as<typename P::TaskResult>;
 
-
-    // ========== 5. 序列化行为 ==========
-    
-    /// 将结果写入定长 Record 表的指定槽位
-    { p.SerializeRecord(slot, result) } -> std::same_as<void>;
-    
-    /// 将结果写入变长 Data 堆
-    { p.SerializeData(os, result) } -> std::same_as<void>;
+    { p.SyncToGlobal(&globalLog, nodeLog) } -> std::same_as<typename P::TaskLogGlobal>;
 
     // ========== 6. 节点驱动的装箱逻辑 ==========
     
@@ -97,7 +91,7 @@ concept ParallelTaskPolicy = requires(
      * 2. 收集结果指针
      * 3. 传递给此函数进行持久化
      */
-    { p.Pack(nodeLog, std::span<typename P::TaskResult*>{}) } -> std::same_as<void>;
+    { p.Pack(&globalLog, &result, id) } -> std::same_as<void>;
 };
 
 /**

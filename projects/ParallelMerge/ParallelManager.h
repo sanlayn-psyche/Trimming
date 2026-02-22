@@ -58,6 +58,7 @@ protected:
     std::atomic<uint64_t> taskIdCounter_{0};
     std::atomic<uint64_t> completedTasks_{0};
     typename P::TaskLogGlobal globalLog_{};
+    std::mutex globalLogMutex_;
     ManagerType trunkManager_;
 
 public:
@@ -74,7 +75,7 @@ public:
 private:
     void WorkerLoop(P& policy, size_t threadId);
     void ExecutePacking(P& policy, NodeType* node);
-    bool UpdateLog(NodeType& local, NodeType* remote);
+    bool UpdateResult(NodeType& local, NodeType* remote);
     void RecursivePack(P& policy, NodeType* node);
     void ReportCompletionUpward(NodeType* completedNode, std::vector<NodeType>& stack, P& policy);
 };
@@ -134,14 +135,40 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
             trunkID = trunkID / kNodeCapacity;
             if (trunkID != localLog[level].index) {
 
-                UpdateLog(localLog[level], remoteLog[level]);
-                auto remote_status = remoteLog[level]->UpdateLogSafe(localLog[level].nodeLog, policy);
-
-                if (policy.ShouldPack(remote_status))
+                // 任务结果与 mask 同步到远程
+                bool is_complete = UpdateResult(localLog[level], remoteLog[level]);
+                if (is_complete && level < trunkManager_.GetMaxLevel())
                 {
-                    ExecutePacking(policy, remoteLog[level]);
+                    // finish
+
                 }
 
+                // 任务记录到远程
+                remoteLog[level]->WaitLogLock();
+                auto res = policy.UpdateLog(remoteLog[level]->nodeLog, localLog[level].nodeLog);
+                if (policy.ShouldPack(res))
+                {
+                    std::unique_lock lock(globalLogMutex_);
+                    auto localLog = policy.SyncToGlobal(globalLog_, node->nodeLog);
+                    lock.unlock();
+                    remoteLog[level]->ResetLog();
+                }
+                remoteLog[level]->RealeaseLogLock();
+
+                ExecutePacking(policy, remoteLog[level]);
+
+
+                if (is_complete && level < trunkManager_.GetMaxLevel())
+                {
+                    // 尚有未打包的数据但已完成，只能被上层节点递归打包
+                    policy.UpdateLog(localLog[level + 1].nodeLog, localLog[level].nodeLog);
+                    localLog[level].ResetLog();
+
+                    auto loc = localLog[level].index % kNodeCapacity;
+                    localLog[level + 1].mask.fetch_or(1ull << loc);
+                }
+
+                // 换表
                 remoteLog[level] = trunkManager_.GetOrCreate(level, trunkID);
                 if (remoteLog[level])
                 {
@@ -169,7 +196,7 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
 }
 
 template<ParallelTaskPolicy P>
-inline bool ParallelExecutor<P>::UpdateLog(NodeType& local, NodeType* remote)
+inline bool ParallelExecutor<P>::UpdateResult(NodeType& local, NodeType* remote)
 {
     if (local.level == 0)
     {
@@ -188,29 +215,28 @@ inline bool ParallelExecutor<P>::UpdateLog(NodeType& local, NodeType* remote)
 }
 
 template<ParallelTaskPolicy P>
-inline void ParallelExecutor<P>::ExecutePacking(P &policy, NodeType *node)  {
-    // 1. 获取本次需要搬运的位 (Manager 负责状态管理)
-    uint64_t toBePacked = node->GetToBePackedMask();
-    if (toBePacked == 0) return;
+inline void ParallelExecutor<P>::ExecutePacking(P &policy, NodeType *node) {
 
-    // 2. 原子标记这些位已进入打包流程
-    node->MarkPacked(toBePacked);
+    bool token = node->packingToken.exchange(true);
+    if (!token)
+    {
+        uint64_t m = node->mask.load(std::memory_order_relaxed);
+        uint64_t p = node->packedMask.load(std::memory_order_relaxed);
+        uint64_t packMask = m & (~p);
 
-    // 3. 收集结果指针 (Manager 负责聚合数据)
-    std::vector<typename P::TaskResult*> results;
-    results.reserve(64);
-    for (uint32_t i = 0; i < 64; ++i) {
-        if ((toBePacked >> i) & 1) {
-            if (node->results[i].has_value()) {
-                results.push_back(&(*node->results[i]));
-            }
+        uint64_t mask = 1;
+        for (uint32_t loc = 0; loc < kNodeCapacity; ++loc)
+        {
+            node->Pack();
+
+            mask = mask << 1;
         }
+
+        policy.Pack(localLog, node->results[0].value(), 0);
+
+
+        node->packingToken.exchange(false);
     }
-
-    if (results.empty()) return;
-
-    // 4. 调用策略执行落盘 (Policy 负责具体处理)
-    policy.Pack(node->nodeLog, results);
 }
 
 

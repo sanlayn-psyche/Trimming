@@ -32,6 +32,7 @@ struct TestPolicy {
     struct TaskLogGlobal {
         std::string recordPath;
         std::string dataPath;
+        size_t offset{0};
     };
 
     struct TaskLogNode {
@@ -100,16 +101,11 @@ struct TestPolicy {
         parent.totalDataSize += child.totalDataSize;
         return parent;
     }
-    
-    // ...
 
-    void SerializeRecord(void* slot, const TaskResult& result) {
-        if (slot) {
-            *static_cast<uint64_t*>(slot) = result.offset;
-        }
-    }
-
-    void SerializeData(std::ostream& os, const TaskResult& result) {
+    // 同步到全局状态，由管理器保证原子性。
+    TaskLogGlobal SyncToGlobal(TaskLogGlobal* global, const TaskLogNode& result) {
+        TaskLogGlobal localLog(*global);
+        global->offset += result.pendingBytes;
     }
 
     // 简化签名：只依赖 Log 状态
@@ -119,32 +115,12 @@ struct TestPolicy {
     }
 
     // New decoupled signature: receives raw results
-    void Pack(TaskLogNode& log, std::span<TaskResult*> results) {
-        size_t batchSize = 0;
-        for (const auto* res : results) {
-            batchSize += res->GetDataSize();
-        }
-
-        if (batchSize == 0) return;
+    void Pack(TaskLogGlobal* localLog, TaskResult* results, uint64_t task_id) {
 
         // Atomic reservation in heap
         size_t startOffset = dataHeap.Reserve(batchSize);
         size_t currentPos = startOffset;
 
-        for (auto* res : results) {
-            res->offset = currentPos;
-            // Async/Parallel write
-            dataHeap.Write(currentPos, res->data.data(), res->data.size());
-
-            // MMAP write for record table
-            void* slot = recordFile.GetSlotPtr(res->taskId);
-            SerializeRecord(slot, *res);
-
-            currentPos += res->data.size();
-        }
-
-        std::cout << "[TestPolicy] Packed batch of " << results.size() 
-                  << " tasks, size: " << batchSize << " bytes\n";
     }
 };
 
