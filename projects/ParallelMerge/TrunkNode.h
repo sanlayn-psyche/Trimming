@@ -113,14 +113,12 @@ struct TrunkNode {
 
     uint64_t TryPacking(const typename P::TaskLogNode& childLog, P& policy) {
 
-
-
-        return res;
+        //return res;
     }
 
     void ResetLog()
     {
-        nodeLog = P::TaskLogNode();
+        nodeLog = typename P::TaskLogNode();
     }
     
     /// 检查节点所有任务是否已处理完成

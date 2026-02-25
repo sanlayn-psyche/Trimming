@@ -89,6 +89,18 @@ public:
     [[nodiscard]] NodeType* Get(uint32_t level, uint64_t nodeIndex) const {
         return Get(NodeType::MakeKey(level, nodeIndex));
     }
+
+    std::unique_ptr<NodeType> Extract(uint32_t level, uint64_t nodeIndex) {
+
+        const uint64_t key = NodeType::MakeKey(level, nodeIndex);
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = trunkMap_.find(key);
+        if (it != trunkMap_.end()) {
+            trunkMap_.erase(it);
+            return std::move(it->second);
+        }
+        return nullptr;
+    }
     
     /**
      * @brief 获取或创建节点

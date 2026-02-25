@@ -106,6 +106,7 @@ struct TestPolicy {
     TaskLogGlobal SyncToGlobal(TaskLogGlobal* global, const TaskLogNode& result) {
         TaskLogGlobal localLog(*global);
         global->offset += result.pendingBytes;
+        return localLog;
     }
 
     // 简化签名：只依赖 Log 状态
@@ -117,10 +118,7 @@ struct TestPolicy {
     // New decoupled signature: receives raw results
     void Pack(TaskLogGlobal* localLog, TaskResult* results, uint64_t task_id) {
 
-        // Atomic reservation in heap
-        size_t startOffset = dataHeap.Reserve(batchSize);
-        size_t currentPos = startOffset;
-
+        size_t currentPos = localLog->offset;
     }
 };
 
