@@ -35,7 +35,7 @@ struct TrunkNode {
     std::atomic<uint64_t> mask{0};
     std::atomic<uint64_t> packedMask{0};
     uint64_t targetMask{~0ULL};
-     std::atomic<bool> packingToken { false };
+    std::atomic<bool> packingToken { false };
 
     /// 节点所属层级
     uint32_t level{0};

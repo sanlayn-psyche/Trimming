@@ -74,6 +74,7 @@ public:
 private:
     void WorkerLoop(P& policy, size_t threadId);
     bool UpdateResult(NodeType& local, NodeType* remote);
+    bool UpdateLog(P& policy, NodeType& local, NodeType* remote);
     void RecursivePack(std::vector<typename P::TaskResult>& res, NodeType *node);
     void ReportCompletionUpward(NodeType* completedNode, std::vector<NodeType>& stack, P& policy);
 };
@@ -108,6 +109,7 @@ inline void ParallelExecutor<P>::Run(P &policy)
     for (auto& worker : workers) {
         worker.join();
     }
+    trunkManager_.ProcessCheck();
     policy.OnFinalize();
 }
 
@@ -127,57 +129,64 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
     while (true)
     {
         uint64_t taskId = taskIdCounter_.fetch_add(1, std::memory_order_relaxed);
-        uint64_t trunkID = taskId;
+        uint64_t trunkID = taskId / kNodeCapacity;
+        typename P::TaskResult task;
+
+        bool toRecord = false;
+        bool toUpdate = false;
+
+        if (taskId < totalTasks_)
+        {
+            task = policy.Process(taskId, localLog[0].nodeLog);
+            if (trunkID == localLog[0].index) {
+                auto loc = taskId % kNodeCapacity;
+                localLog[0].mask.fetch_or(1ull << loc);
+                localLog[0].results[loc] = task;
+            }
+            else {
+                toUpdate = true;
+                toRecord = true;
+            }
+        }
+        else {
+            toUpdate = true;
+        }
 
         for (uint32_t level = 0; level <= trunkManager_.GetMaxLevel(); ++level) {
 
-            trunkID = trunkID / kNodeCapacity;
-            if (trunkID != localLog[level].index) {
-
+            if (toUpdate || trunkID != localLog[level].index) {
                 // 任务结果与 mask 同步到远程
+                toUpdate = false;
+                auto loc = localLog[level].index % kNodeCapacity;
+
                 bool is_complete = UpdateResult(localLog[level], remoteLog[level]);
                 if (is_complete && level < trunkManager_.GetMaxLevel())
                 {
-                    auto loc = localLog[level].index % kNodeCapacity;
                     localLog[level + 1].mask.fetch_or(1ull << loc);
                     printf("Thread#%x Detected Completed Node: (%d, %d)\n", std::this_thread::get_id(), level, localLog[level].index);
                 }
 
-                // 任务记录到远程
                 remoteLog[level]->WaitLogLock();
-                auto res = policy.UpdateLog(remoteLog[level]->nodeLog, localLog[level].nodeLog);
-                if (policy.ShouldSync(res))
-                {
-                    printf("Thread#%x Detected To Sync: (%d, %d)\n", std::this_thread::get_id(), level, localLog[level].index);
-                    std::vector<typename P::TaskResult> tasks;
-                    RecursivePack(tasks, remoteLog[level]);
-
-                    std::unique_lock lock(globalLogMutex_);
-                    policy.Sync(std::move(tasks), remoteLog[level]->nodeLog);
-                    remoteLog[level]->ResetLog();
+                bool is_packed = UpdateLog(policy, localLog[level], remoteLog[level]);
+                if (is_packed && level < trunkManager_.GetMaxLevel()) {
+                    localLog[level + 1].packedMask.fetch_or(1ull << loc);
                     remoteLog[level]->RealeaseLogLock();
-                    lock.unlock();
-
-                    if (remoteLog[level]->IsAllPacked()) {
-                        // 虽然很危险，但执行逻辑保证了此时不会有其它线程访问该节点，可以直接删除
-                        auto child = trunkManager_.Extract(level, remoteLog[level]->index);
-                    }
+                    trunkManager_.Extract(level, remoteLog[level]->index);
                 }
-                else {
-                    if (is_complete && level < trunkManager_.GetMaxLevel()) {
-                        // 尚有未打包的数据但已完成，只能被上层节点递归打包
-                        policy.UpdateLog(localLog[level + 1].nodeLog, localLog[level].nodeLog);
-                        localLog[level].ResetLog();
-                    }
-                    remoteLog[level]->RealeaseLogLock();
+                else if (is_complete && level < trunkManager_.GetMaxLevel()) {
+                    policy.UpdateLog(localLog[level + 1].nodeLog, localLog[level].nodeLog);
+                    localLog[level].ResetLog();
                 }
 
                 // 换表
-                remoteLog[level] = trunkManager_.GetOrCreate(level, trunkID);
-                if (remoteLog[level])
-                {
-                    localLog[level] = remoteLog[level]->CreateLocalLog();
+                if (trunkID != localLog[level].index) {
+                    remoteLog[level] = trunkManager_.GetOrCreate(level, trunkID);
+                    if (remoteLog[level])
+                    {
+                        localLog[level] = remoteLog[level]->CreateLocalLog();
+                    }
                 }
+                trunkID = trunkID / kNodeCapacity;
             }
             else
             {
@@ -185,18 +194,36 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
             }
         }
 
-        if (taskId < totalTasks_)
-        {
-            auto result = policy.Process(taskId, localLog[0].nodeLog);
+        if (toRecord) {
             auto loc = taskId % kNodeCapacity;
             localLog[0].mask.fetch_or(1ull << loc);
-            localLog[0].results[loc] = result;
+            localLog[0].results[loc] = task;
         }
-        else
-        {
+
+        if (taskId >= totalTasks_) {
             break;
         }
     }
+}
+
+template<ParallelTaskPolicy P>
+inline bool ParallelExecutor<P>::UpdateLog(P& policy, NodeType& local, NodeType* remote) {
+
+    // 任务记录到远程
+    auto res = policy.UpdateLog(remote->nodeLog, local.nodeLog);
+    remote->packedMask.fetch_or(local.packedMask, std::memory_order_release);
+    if (policy.ShouldSync(res))
+    {
+        printf("Thread#%x Detected To Sync: (%d, %d)\n", std::this_thread::get_id(), local.level, local.index);
+        std::vector<typename P::TaskResult> merged_task;
+        RecursivePack(merged_task, remote);
+
+        std::unique_lock lock(globalLogMutex_);
+        policy.Sync(std::move(merged_task), remote->nodeLog);
+        remote->ResetLog();
+        lock.unlock();
+    }
+    return false;
 }
 
 template<ParallelTaskPolicy P>

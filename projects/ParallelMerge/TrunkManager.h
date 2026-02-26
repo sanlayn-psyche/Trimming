@@ -211,6 +211,14 @@ public:
         return root && root->IsComplete();
     }
 
+    void ProcessCheck() {
+        printf("Result Check\n");
+        for (auto& ite : trunkMap_) {
+            auto &node = ite.second;
+            printf("\tNode: (%d, %d), target: %llx, finish: %llx, sync: %llx\n",  node->level, node->index, node->targetMask, node->mask.load(), node->packedMask.load());
+        }
+    }
+
 private:
     // ========== 辅助方法 ==========
     
@@ -276,6 +284,9 @@ private:
         if (nodeIndex < lastNodeIndex) {
             return ~0ULL;
         }
+        if (nodeIndex > lastNodeIndex) {
+            return 0ULL;
+        }
         
         // 计算最后一个节点的子任务/子节点数
         uint64_t itemsAtPrevLevel;
@@ -305,13 +316,17 @@ private:
         for (uint32_t level = 0; level <= maxLevel_; ++level) {
             for (size_t i = 0; i < count; ++i) {
                 uint64_t targetMask = CalculateTargetMask(level, i);
-                printf("Thread#%x Create Node: (%d, %d)\n", std::this_thread::get_id(), level, i);
-                auto node = std::make_unique<NodeType>(level, i, targetMask);
-                uint64_t key = node->GetKey();
-                trunkMap_.emplace(key, std::move(node));
+                if (targetMask) {
+                    printf("Thread#%x Create Node: (%d, %d)\n", std::this_thread::get_id(), level, i);
+                    auto node = std::make_unique<NodeType>(level, i, targetMask);
+                    uint64_t key = node->GetKey();
+                    trunkMap_.emplace(key, std::move(node));
+                }
             }
         }
     }
+
+
     
 private:
     mutable std::shared_mutex mutex_;
