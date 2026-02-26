@@ -146,12 +146,15 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
                 auto res = policy.UpdateLog(remoteLog[level]->nodeLog, localLog[level].nodeLog);
                 if (policy.ShouldSync(res))
                 {
+                    std::vector<typename P::TaskResult> tasks;
+                    RecursivePack(tasks, remoteLog[level]);
+
                     std::unique_lock lock(globalLogMutex_);
-                    RecursivePack(policy, globalLogSlice, remoteLog[level]);
-                    policy.Sync()(&globalLog_, remoteLog[level]->nodeLog);
-                    lock.unlock();
+                    policy.Sync(tasks, remoteLog[level]->nodeLog);
                     remoteLog[level]->ResetLog();
                     remoteLog[level]->RealeaseLogLock();
+                    lock.unlock();
+
                     if (remoteLog[level]->IsAllPacked()) {
                         // 虽然很危险，但执行逻辑保证了此时不会有其它线程访问该节点，可以直接删除
                         auto child = trunkManager_.Extract(level, remoteLog[level]->index);
@@ -211,8 +214,6 @@ inline bool ParallelExecutor<P>::UpdateResult(NodeType& local, NodeType* remote)
     }
     return remote->ReportAndCheckComplete(local.mask);
 }
-
-
 
 
 template<ParallelTaskPolicy P>

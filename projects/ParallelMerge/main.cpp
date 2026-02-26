@@ -14,6 +14,7 @@
 #include <span>
 #include <chrono>
 #include <cassert>
+#include <condition_variable>
 
 namespace parallel_merge {
 
@@ -33,33 +34,32 @@ struct TestPolicy {
         uint64_t subNodeCnt{0};
     };
 
-
     std::string baseDir = "test_output";
     std::string fileDir;
 
     std::ofstream target;
     uint64_t fileSize{1024 * 1024};
 
+    std::atomic_bool finished{false};
+    std::condition_variable cv;
+    std::vector<TaskResult> to_merge;
+
+
     void OnInit() {
         if (!std::filesystem::exists(baseDir)) {
             std::filesystem::create_directories(baseDir);
         }
-
         fileDir = baseDir + "/records.bin";
-        target.open(fileDir, std::ios::binary);
-        std::filesystem::resize_file("data.bin", fileSize);
+
+        target.open(fileDir, std::ios::out | std::ios::binary);
+        std::filesystem::resize_file(fileDir, fileSize);
         target.seekp(0);
+
         std::cout << "[TestPolicy] Storage initialized at " << baseDir << "\n";
     }
 
     void OnFinalize() {
-        //dataHeap.ShrinkToFit();
-        //recordFile.Flush();
-        
-        // 重要：必须关闭句柄以允许校验代码读取文件
-        //recordFile.Close();
-        //dataHeap.Close();
-        
+        target.close();
         std::cout << "[TestPolicy] Finalized and storage closed.\n";
     }
 
@@ -76,14 +76,14 @@ struct TestPolicy {
     }
 
     // 新增：层级聚合逻辑
-    void UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
-        //parent.pendingCount += child.pendingCount;
-        //parent.pendingBytes += child.pendingBytes;
-       // parent.totalDataSize += child.totalDataSize;
+    TaskLogNode UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
+        parent.dataSize += child.dataSize;
+        parent.subNodeCnt += child.subNodeCnt;
+        return parent;
     }
 
     // 同步到全局状态，由管理器保证原子性。
-    void Sync(std::vector<std::unique_ptr<TaskResult>> &result, TaskLogNode& log) {
+    void Sync(std::vector<TaskResult> &result, TaskLogNode& log) {
 
     }
 
