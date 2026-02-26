@@ -111,11 +111,6 @@ struct TrunkNode {
 #endif
     }
 
-    uint64_t TryPacking(const typename P::TaskLogNode& childLog, P& policy) {
-
-        //return res;
-    }
-
     void ResetLog()
     {
         nodeLog = typename P::TaskLogNode();

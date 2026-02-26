@@ -45,7 +45,7 @@ concept ParallelTaskPolicy = requires(
     { p.OnInit() } -> std::same_as<void>;
     { p.OnFinalize() } -> std::same_as<void>;
     { p.Process(id, nodeLog) } -> std::same_as<typename P::TaskResult>;
-    { p.Sync(result_list, nodeLog) } -> std::same_as<void>;
+    { p.Sync(std::move(result_list), nodeLog) } -> std::same_as<void>;
     { p.ShouldSync(nodeLog) } -> std::convertible_to<bool>;
     { p.UpdateLog(nodeLog, nodeLog) } -> std::same_as<typename P::TaskLogNode>;
 };

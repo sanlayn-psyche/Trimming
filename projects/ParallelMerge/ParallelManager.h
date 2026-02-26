@@ -108,6 +108,7 @@ inline void ParallelExecutor<P>::Run(P &policy)
     for (auto& worker : workers) {
         worker.join();
     }
+    policy.OnFinalize();
 }
 
 template<ParallelTaskPolicy P>
@@ -139,6 +140,7 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
                 {
                     auto loc = localLog[level].index % kNodeCapacity;
                     localLog[level + 1].mask.fetch_or(1ull << loc);
+                    printf("Thread#%x Detected Completed Node: (%d, %d)\n", std::this_thread::get_id(), level, localLog[level].index);
                 }
 
                 // 任务记录到远程
@@ -146,11 +148,12 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
                 auto res = policy.UpdateLog(remoteLog[level]->nodeLog, localLog[level].nodeLog);
                 if (policy.ShouldSync(res))
                 {
+                    printf("Thread#%x Detected To Sync: (%d, %d)\n", std::this_thread::get_id(), level, localLog[level].index);
                     std::vector<typename P::TaskResult> tasks;
                     RecursivePack(tasks, remoteLog[level]);
 
                     std::unique_lock lock(globalLogMutex_);
-                    policy.Sync(tasks, remoteLog[level]->nodeLog);
+                    policy.Sync(std::move(tasks), remoteLog[level]->nodeLog);
                     remoteLog[level]->ResetLog();
                     remoteLog[level]->RealeaseLogLock();
                     lock.unlock();

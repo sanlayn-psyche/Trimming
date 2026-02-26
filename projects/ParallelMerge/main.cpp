@@ -7,6 +7,7 @@
 #include "StorageManager.h"
 
 #include <iostream>
+#include <queue>
 #include <vector>
 #include <string>
 #include <filesystem>
@@ -40,26 +41,56 @@ struct TestPolicy {
     std::ofstream target;
     uint64_t fileSize{1024 * 1024};
 
-    std::atomic_bool finished{false};
+    std::queue<std::vector<TaskResult>> task_queue;
+    std::mutex task_mtx;
     std::condition_variable cv;
-    std::vector<TaskResult> to_merge;
+    std::atomic_bool terminate = false;
+
+    std::unique_ptr<std::thread> write_thread {nullptr};
 
 
-    void OnInit() {
+    void write() {
+
         if (!std::filesystem::exists(baseDir)) {
             std::filesystem::create_directories(baseDir);
         }
         fileDir = baseDir + "/records.bin";
-
         target.open(fileDir, std::ios::out | std::ios::binary);
-        std::filesystem::resize_file(fileDir, fileSize);
-        target.seekp(0);
+        std::queue<std::vector<TaskResult>> local_queue;
 
+        while (!terminate.load(std::memory_order_acquire)) {
+
+            if (local_queue.empty()) {
+                std::unique_lock<std::mutex> lock(task_mtx);
+                cv.wait(lock, [this]{ return !task_queue.empty() || terminate.load(std::memory_order_acquire);});
+                if (terminate.load(std::memory_order_acquire) && task_queue.empty()) break;
+                local_queue.swap(task_queue);
+            }
+
+            while (!local_queue.empty()) {
+                auto& list = local_queue.front();
+
+                for (auto& task : list) {
+                    target.write(task.data.data(), task.data.size());
+                }
+
+                local_queue.pop();
+            }
+        }
+
+        target.close();
+    }
+
+    void OnInit() {
+
+        write_thread = std::make_unique<std::thread>([this](){write();});
         std::cout << "[TestPolicy] Storage initialized at " << baseDir << "\n";
     }
 
     void OnFinalize() {
-        target.close();
+        terminate.store(true, std::memory_order_release);
+        cv.notify_one();
+        write_thread->join();
         std::cout << "[TestPolicy] Finalized and storage closed.\n";
     }
 
@@ -70,8 +101,9 @@ struct TestPolicy {
         // 生成变长数据：随机长度 100-200 字节
         size_t len = 100 + (id % 101);
         result.data.resize(len);
-        // ...
-        //localLog.pendingBytes += len;
+
+        localLog.dataSize += len;
+        localLog.subNodeCnt++;
         return result;
     }
 
@@ -83,13 +115,18 @@ struct TestPolicy {
     }
 
     // 同步到全局状态，由管理器保证原子性。
-    void Sync(std::vector<TaskResult> &result, TaskLogNode& log) {
-
+    void Sync(std::vector<TaskResult> &&result, TaskLogNode& log) {
+        {
+            std::lock_guard<std::mutex> lock(task_mtx);
+            task_queue.push(std::move(result));
+        }
+        cv.notify_one();
     }
 
     static bool ShouldSync(const TaskLogNode& log) {
-        return log.subNodeCnt >= 1024 || log.dataSize >= 1024 * 1024 * 1024;
+        return log.subNodeCnt >= 20 || log.dataSize >= 1024 * 1024 * 1024;
     }
+
 };
 
 } // namespace parallel_merge

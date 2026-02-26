@@ -17,6 +17,7 @@
 #include <mutex>
 #include <memory>
 #include <optional>
+#include <thread>
 
 namespace parallel_merge {
 
@@ -92,12 +93,15 @@ public:
 
     std::unique_ptr<NodeType> Extract(uint32_t level, uint64_t nodeIndex) {
 
+        printf("Thread#%x Delete Node: (%d, %d)\n", std::this_thread::get_id(), level, nodeIndex);
+
         const uint64_t key = NodeType::MakeKey(level, nodeIndex);
-        std::shared_lock<std::shared_mutex> lock(mutex_);
+        std::unique_lock lock(mutex_);
         auto it = trunkMap_.find(key);
         if (it != trunkMap_.end()) {
+            auto node = std::move(it->second);
             trunkMap_.erase(it);
-            return std::move(it->second);
+            return node;
         }
         return nullptr;
     }
@@ -125,7 +129,7 @@ public:
         
         // 慢速路径：写锁创建
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        
+        printf("Thread#%x Create Node: (%d, %d)\n", std::this_thread::get_id(), level, nodeIndex);
         // Double-check
         auto it = trunkMap_.find(key);
         if (it != trunkMap_.end()) {
@@ -301,6 +305,7 @@ private:
         for (uint32_t level = 0; level <= maxLevel_; ++level) {
             for (size_t i = 0; i < count; ++i) {
                 uint64_t targetMask = CalculateTargetMask(level, i);
+                printf("Thread#%x Create Node: (%d, %d)\n", std::this_thread::get_id(), level, i);
                 auto node = std::make_unique<NodeType>(level, i, targetMask);
                 uint64_t key = node->GetKey();
                 trunkMap_.emplace(key, std::move(node));
