@@ -57,7 +57,6 @@ protected:
     size_t threadCount_{0};
     std::atomic<uint64_t> taskIdCounter_{0};
     std::atomic<uint64_t> completedTasks_{0};
-    typename P::TaskLogGlobal globalLog_{};
     std::mutex globalLogMutex_;
     ManagerType trunkManager_;
 
@@ -74,9 +73,8 @@ public:
 
 private:
     void WorkerLoop(P& policy, size_t threadId);
-    void ExecutePacking(P& policy, typename P::TaskLogGlobal &log, NodeType* node);
     bool UpdateResult(NodeType& local, NodeType* remote);
-    void RecursivePack(P& policy, typename P::TaskLogGlobal &log, NodeType* node);
+    void RecursivePack(std::vector<typename P::TaskResult>& res, NodeType *node);
     void ReportCompletionUpward(NodeType* completedNode, std::vector<NodeType>& stack, P& policy);
 };
 
@@ -99,7 +97,7 @@ inline bool ParallelExecutor<P>::Initialize(uint64_t totalTasks, size_t threadCo
 template<ParallelTaskPolicy P>
 inline void ParallelExecutor<P>::Run(P &policy)
 {
-    globalLog_ = P::OnInit();
+    policy.OnInit();
     std::vector<std::thread> workers;
     workers.reserve(threadCount_);
     for (size_t i = 0; i < threadCount_; ++i) {
@@ -146,14 +144,14 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
                 // 任务记录到远程
                 remoteLog[level]->WaitLogLock();
                 auto res = policy.UpdateLog(remoteLog[level]->nodeLog, localLog[level].nodeLog);
-                if (policy.ShouldPack(res))
+                if (policy.ShouldSync(res))
                 {
                     std::unique_lock lock(globalLogMutex_);
-                    auto globalLogSlice = policy.SyncToGlobal(&globalLog_, remoteLog[level]->nodeLog);
+                    RecursivePack(policy, globalLogSlice, remoteLog[level]);
+                    policy.Sync()(&globalLog_, remoteLog[level]->nodeLog);
                     lock.unlock();
                     remoteLog[level]->ResetLog();
                     remoteLog[level]->RealeaseLogLock();
-                    RecursivePack(policy, globalLogSlice, remoteLog[level]);
                     if (remoteLog[level]->IsAllPacked()) {
                         // 虽然很危险，但执行逻辑保证了此时不会有其它线程访问该节点，可以直接删除
                         auto child = trunkManager_.Extract(level, remoteLog[level]->index);
@@ -214,29 +212,24 @@ inline bool ParallelExecutor<P>::UpdateResult(NodeType& local, NodeType* remote)
     return remote->ReportAndCheckComplete(local.mask);
 }
 
-template<ParallelTaskPolicy P>
-inline void ParallelExecutor<P>::ExecutePacking(P &policy, typename P::TaskLogGlobal &log ,NodeType *node) {
 
-    uint64_t m = node->mask.load(std::memory_order_relaxed);
-    uint64_t p = node->packedMask.load(std::memory_order_relaxed);
-    uint64_t packMask = m & (~p);
-    uint64_t mask = 1;
-    auto taskID = node->index * kNodeCapacity;
-    for (uint32_t loc = 0; loc < kNodeCapacity; ++loc, ++taskID)
-    {
-        if (mask & packMask) {
-            policy.Pack(&log, &node->results[loc].value(), taskID);
-        }
-        mask = mask << 1;
-    }
-}
 
 
 template<ParallelTaskPolicy P>
-inline void ParallelExecutor<P>::RecursivePack(P& policy, typename P::TaskLogGlobal &log, NodeType* node) {
+inline void ParallelExecutor<P>::RecursivePack(std::vector<typename P::TaskResult>& res, NodeType *node) {
     if (node->IsLeafLevel()) {
         // L0 节点：直接执行物理装箱
-        ExecutePacking(policy,log, node);
+        uint64_t packMask = node->GetToBePackedMask();
+        uint64_t mask = 1;
+        for (uint32_t loc = 0; loc < kNodeCapacity; ++loc)
+        {
+            if (mask & packMask) {
+                res.push_back(std::move(node->results[loc].value()));
+            }
+            mask = mask << 1;
+        }
+        node->packedMask.fetch_or(packMask);
+
     } else {
         // 中间节点：遍历所有"已完成但未打包"的子节点
         uint64_t pendingMask = node->GetToBePackedMask();
@@ -251,13 +244,8 @@ inline void ParallelExecutor<P>::RecursivePack(P& policy, typename P::TaskLogGlo
             // 获取子节点, 归档后应该删除，因为不再被访问了
             auto child = trunkManager_.Extract(childLevel, childIndex);
 
-            // 递归处理子节点
-            if (child) {RecursivePack(policy, log,child.get());}
-
-            // 标记本层对应项已打包
+            if (child) {RecursivePack(res,child.get());}
             node->MarkPacked(bit);
-
-            // 清除该位，继续下一位 (pendingMask &= ~bit 也可以)
             pendingMask &= (pendingMask - 1);
         }
     }

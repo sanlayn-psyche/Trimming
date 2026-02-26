@@ -13,6 +13,7 @@
 
 #include <concepts>
 #include <cstdint>
+#include <memory>
 #include <ostream>
 #include <span>
 #include <vector>
@@ -32,66 +33,21 @@ concept ParallelTaskPolicy = requires(
     uint64_t id,
     typename P::TaskResult result,
     typename P::TaskLogNode nodeLog,
-    typename P::TaskLogGlobal globalLog,
+    std::vector<std::unique_ptr<typename P::TaskResult>> result_list,
     void* slot,
     std::ostream& os
 ) {
-    // ========== 1. 必须定义的类型 ==========
-    
     /// 每一个具体任务在内存中的缓存
     typename P::TaskResult;
-    
-    /// 全局任务状态记录表
-    typename P::TaskLogGlobal;
-    
     /// 节点所属的任务状态记录表
     typename P::TaskLogNode;
 
-    // ========== 2. 生命周期回调 ==========
-    
-    /// 初始化（创建文件等），返回全局状态
-    { P::OnInit() } -> std::same_as<typename P::TaskLogGlobal>;
-    
-    /// 收尾（Shrink 文件等）
-    { P::OnFinalize() } -> std::same_as<void>;
-
-    // ========== 3. 核心处理逻辑 ==========
-    
-    /// 输入任务 ID，输出处理结果, 更新本地任务记录
+    { p.OnInit() } -> std::same_as<void>;
+    { p.OnFinalize() } -> std::same_as<void>;
     { p.Process(id, nodeLog) } -> std::same_as<typename P::TaskResult>;
-
-    { p.SyncToGlobal(&globalLog, nodeLog) } -> std::same_as<typename P::TaskLogGlobal>;
-
-    // ========== 6. 节点驱动的装箱逻辑 ==========
-    
-    /**
-     * @brief 判断是否应该触发装箱
-     * @param nodeLog 节点日志上下文（包含 pendingCount 等状态）
-     * 
-     * Manager 在调用前会自动更新 log.pendingCount
-     */
-    { p.ShouldPack(nodeLog) } -> std::convertible_to<bool>;
-    
-    /**
-     * @brief 更新父节点日志
-     * @param parentLog 父节点日志
-     * @param childLog 子节点日志
-     * 
-     * 用于层级聚合，通常是将 child 的 pendingCount/Bytes 累加到 parent
-     */
-    { p.UpdateLog(nodeLog, nodeLog) } -> std::same_as<typename P::TaskLogNode>;
-    
-    /**
-     * @brief 执行装箱动作
-     * @param nodeLog 节点日志上下文
-     * @param results 待打包的结果列表（指针数组）
-     * 
-     * 管理器负责：
-     * 1. 原子性地标识待打包位
-     * 2. 收集结果指针
-     * 3. 传递给此函数进行持久化
-     */
-    { p.Pack(&globalLog, &result, id) } -> std::same_as<void>;
+    { p.Sync(result_list, nodeLog) } -> std::same_as<void>;
+    { p.ShouldSync(nodeLog) } -> std::convertible_to<bool>;
+    { p.UpdateLog(nodeLog, nodeLog) } -> std::same_as<void>;
 };
 
 /**

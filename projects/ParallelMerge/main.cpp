@@ -21,59 +21,44 @@ namespace parallel_merge {
  * @brief 验证策略：实现具体的文件写入逻辑
  */
 struct TestPolicy {
+
     struct TaskResult {
         uint64_t taskId;
         std::vector<char> data;
         size_t offset{0};
-
         [[nodiscard]] size_t GetDataSize() const { return data.size(); }
     };
-
-    struct TaskLogGlobal {
-        std::string recordPath;
-        std::string dataPath;
-        size_t offset{0};
-    };
-
     struct TaskLogNode {
-        uint64_t totalDataSize{0};
-        uint64_t pendingCount{0};  
-        uint64_t pendingBytes{0};  // 新增：待打包数据量
+        uint64_t dataSize{0};
+        uint64_t subNodeCnt{0};
     };
 
-    // 静态成员用于跨线程访问存储（仅用于测试）
-    static inline RecordFile recordFile;
-    static inline DataHeap dataHeap;
-    static inline std::string baseDir = "test_output";
 
-    static TaskLogGlobal OnInit() {
-        std::filesystem::create_directories(baseDir);
-        TaskLogGlobal log;
-        log.recordPath = baseDir + "/records.bin";
-        log.dataPath = baseDir + "/data.bin";
+    std::string baseDir = "test_output";
+    std::string fileDir;
 
-        const uint64_t kMaxTasks = 1000000;
-        const uint64_t kMaxData = kMaxTasks * 256; // 假设平均 256 字节
+    std::ofstream target;
+    uint64_t fileSize{1024 * 1024};
 
-        // 初始化存储
-        if (!recordFile.Create(log.recordPath, 8, kMaxTasks)) {
-            throw std::runtime_error("Failed to create record file");
-        }
-        if (!dataHeap.Create(log.dataPath, kMaxData)) {
-            throw std::runtime_error("Failed to create data heap");
+    void OnInit() {
+        if (!std::filesystem::exists(baseDir)) {
+            std::filesystem::create_directories(baseDir);
         }
 
+        fileDir = baseDir + "/records.bin";
+        target.open(fileDir, std::ios::binary);
+        std::filesystem::resize_file("data.bin", fileSize);
+        target.seekp(0);
         std::cout << "[TestPolicy] Storage initialized at " << baseDir << "\n";
-        return log;
     }
 
-    static void OnFinalize() {
-        dataHeap.ShrinkToFit();
-        recordFile.Flush();
+    void OnFinalize() {
+        //dataHeap.ShrinkToFit();
+        //recordFile.Flush();
         
         // 重要：必须关闭句柄以允许校验代码读取文件
-        recordFile.Close();
-        dataHeap.Close();
+        //recordFile.Close();
+        //dataHeap.Close();
         
         std::cout << "[TestPolicy] Finalized and storage closed.\n";
     }
@@ -86,39 +71,24 @@ struct TestPolicy {
         size_t len = 100 + (id % 101);
         result.data.resize(len);
         // ...
-        localLog.pendingBytes += len;
+        //localLog.pendingBytes += len;
         return result;
     }
 
-    TaskLogNode& Update(TaskLogNode& log) {
-        return log;
-    }
-
     // 新增：层级聚合逻辑
-    TaskLogNode UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
-        parent.pendingCount += child.pendingCount;
-        parent.pendingBytes += child.pendingBytes;
-        parent.totalDataSize += child.totalDataSize;
-        return parent;
+    void UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
+        //parent.pendingCount += child.pendingCount;
+        //parent.pendingBytes += child.pendingBytes;
+       // parent.totalDataSize += child.totalDataSize;
     }
 
     // 同步到全局状态，由管理器保证原子性。
-    TaskLogGlobal SyncToGlobal(TaskLogGlobal* global, const TaskLogNode& result) {
-        TaskLogGlobal localLog(*global);
-        global->offset += result.pendingBytes;
-        return localLog;
+    void Sync(std::vector<std::unique_ptr<TaskResult>> &result, TaskLogNode& log) {
+
     }
 
-    // 简化签名：只依赖 Log 状态
-    bool ShouldPack(const TaskLogNode& log) {
-        // 自适应策略：8个任务 或 2KB 就打包
-        return log.pendingCount >= 8 || log.pendingBytes >= 2048; 
-    }
-
-    // New decoupled signature: receives raw results
-    void Pack(TaskLogGlobal* localLog, TaskResult* results, uint64_t task_id) {
-
-        size_t currentPos = localLog->offset;
+    static bool ShouldSync(const TaskLogNode& log) {
+        return log.subNodeCnt >= 1024 || log.dataSize >= 1024 * 1024 * 1024;
     }
 };
 
