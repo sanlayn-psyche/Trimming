@@ -94,7 +94,7 @@ struct TestPolicy {
         std::cout << "[TestPolicy] Finalized and storage closed.\n";
     }
 
-    TaskResult Process(uint64_t id, TaskLogNode& localLog) {
+    TaskResult Process(uint64_t id, TaskLogNode& localLog) const {
         TaskResult result;
         result.taskId = id;
         
@@ -140,6 +140,7 @@ bool VerifyResults(uint64_t totalTasks) {
 }
 
 int main() {
+    setvbuf(stdout, NULL, _IONBF, 0);
     std::cout << "=== ParallelMerge Phase 2 Test ===\n";
     
     try {

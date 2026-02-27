@@ -132,20 +132,20 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
         uint64_t trunkID = taskId / kNodeCapacity;
         typename P::TaskResult task;
 
-        bool toRecord = false;
+        bool toProcess = false;
         bool toUpdate = false;
 
         if (taskId < totalTasks_)
         {
-            task = policy.Process(taskId, localLog[0].nodeLog);
             if (trunkID == localLog[0].index) {
+                task = policy.Process(taskId, localLog[0].nodeLog);
                 auto loc = taskId % kNodeCapacity;
                 localLog[0].mask.fetch_or(1ull << loc);
                 localLog[0].results[loc] = task;
             }
             else {
                 toUpdate = true;
-                toRecord = true;
+                toProcess = true;
             }
         }
         else {
@@ -167,15 +167,21 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
                 }
 
                 remoteLog[level]->WaitLogLock();
-                bool is_packed = UpdateLog(policy, localLog[level], remoteLog[level]);
-                if (is_packed && level < trunkManager_.GetMaxLevel()) {
+                bool is_all_packed = UpdateLog(policy, localLog[level], remoteLog[level]);
+                if (is_all_packed && level < trunkManager_.GetMaxLevel()) {
                     localLog[level + 1].packedMask.fetch_or(1ull << loc);
+                    // 逻辑上确保了不再会被访问，所以可以直接释放；
+                    trunkManager_.Extract(level, localLog[level].index);
                     remoteLog[level]->RealeaseLogLock();
-                    trunkManager_.Extract(level, remoteLog[level]->index);
                 }
                 else if (is_complete && level < trunkManager_.GetMaxLevel()) {
                     policy.UpdateLog(localLog[level + 1].nodeLog, localLog[level].nodeLog);
                     localLog[level].ResetLog();
+                    remoteLog[level]->ResetLog();
+                    remoteLog[level]->RealeaseLogLock();
+                }
+                else {
+                    remoteLog[level]->RealeaseLogLock();
                 }
 
                 // 换表
@@ -194,7 +200,8 @@ inline void ParallelExecutor<P>::WorkerLoop(P &policy, size_t threadId) {
             }
         }
 
-        if (toRecord) {
+        if (toProcess) {
+            task = policy.Process(taskId, localLog[0].nodeLog);
             auto loc = taskId % kNodeCapacity;
             localLog[0].mask.fetch_or(1ull << loc);
             localLog[0].results[loc] = task;
@@ -210,9 +217,8 @@ template<ParallelTaskPolicy P>
 inline bool ParallelExecutor<P>::UpdateLog(P& policy, NodeType& local, NodeType* remote) {
 
     // 任务记录到远程
-    auto res = policy.UpdateLog(remote->nodeLog, local.nodeLog);
-    remote->packedMask.fetch_or(local.packedMask, std::memory_order_release);
-    if (policy.ShouldSync(res))
+    local.nodeLog = policy.UpdateLog(remote->nodeLog, local.nodeLog);;
+    if (policy.ShouldSync(local.nodeLog))
     {
         printf("Thread#%x Detected To Sync: (%d, %d)\n", std::this_thread::get_id(), local.level, local.index);
         std::vector<typename P::TaskResult> merged_task;
@@ -220,10 +226,15 @@ inline bool ParallelExecutor<P>::UpdateLog(P& policy, NodeType& local, NodeType*
 
         std::unique_lock lock(globalLogMutex_);
         policy.Sync(std::move(merged_task), remote->nodeLog);
-        remote->ResetLog();
         lock.unlock();
+        remote->ResetLog();
     }
-    return false;
+
+    local.packedMask.store(remote->packedMask.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    if (local.IsAllPacked()) {
+        return true;
+    }
+    return true;
 }
 
 template<ParallelTaskPolicy P>
@@ -242,15 +253,20 @@ inline bool ParallelExecutor<P>::UpdateResult(NodeType& local, NodeType* remote)
             mask = mask << 1;
         }
     }
-    return remote->ReportAndCheckComplete(local.mask);
+    uint64_t localmask = local.mask.load(std::memory_order_relaxed);
+    bool is_complete = remote->ReportAndCheckComplete(localmask);
+    local.mask.store(localmask, std::memory_order_relaxed);
+    return is_complete;
 }
 
 
 template<ParallelTaskPolicy P>
 inline void ParallelExecutor<P>::RecursivePack(std::vector<typename P::TaskResult>& res, NodeType *node) {
+
+    uint64_t packMask = node->GetToBePackedMask();
     if (node->IsLeafLevel()) {
         // L0 节点：直接执行物理装箱
-        uint64_t packMask = node->GetToBePackedMask();
+
         uint64_t mask = 1;
         for (uint32_t loc = 0; loc < kNodeCapacity; ++loc)
         {
@@ -260,13 +276,11 @@ inline void ParallelExecutor<P>::RecursivePack(std::vector<typename P::TaskResul
             mask = mask << 1;
         }
         node->packedMask.fetch_or(packMask);
-
     } else {
         // 中间节点：遍历所有"已完成但未打包"的子节点
-        uint64_t pendingMask = node->GetToBePackedMask();
-        while (pendingMask) {
+        while (packMask) {
             // 取出最低位的 1
-            int i = std::countr_zero(pendingMask);
+            int i = std::countr_zero(packMask);
             uint64_t bit = 1ULL << i;
 
             uint32_t childLevel = node->level - 1;
@@ -274,12 +288,12 @@ inline void ParallelExecutor<P>::RecursivePack(std::vector<typename P::TaskResul
 
             // 获取子节点, 归档后应该删除，因为不再被访问了
             auto child = trunkManager_.Extract(childLevel, childIndex);
-
             if (child) {RecursivePack(res,child.get());}
             node->MarkPacked(bit);
-            pendingMask &= (pendingMask - 1);
+            packMask &= (packMask - 1);
         }
     }
+
 }
 
 

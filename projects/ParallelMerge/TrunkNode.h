@@ -154,9 +154,9 @@ struct TrunkNode {
         return mask.fetch_or(bitMask, std::memory_order_acq_rel) | bitMask;
     }
     
-    bool ReportAndCheckComplete(uint64_t bitMask) noexcept {
-        const uint64_t newMask = ReportCompletion(bitMask);
-        return newMask == targetMask;
+    bool ReportAndCheckComplete(uint64_t& mask) noexcept {
+        mask = ReportCompletion(mask);
+        return mask == targetMask;
     }
     
     // ========== L0 层结果管理 ==========
