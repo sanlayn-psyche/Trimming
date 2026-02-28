@@ -234,7 +234,7 @@ inline bool ParallelExecutor<P>::UpdateLog(P& policy, NodeType& local, NodeType*
     if (local.IsAllPacked()) {
         return true;
     }
-    return true;
+    return false;
 }
 
 template<ParallelTaskPolicy P>

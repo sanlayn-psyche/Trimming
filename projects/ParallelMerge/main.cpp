@@ -26,8 +26,8 @@ struct TestPolicy {
 
     struct TaskResult {
         uint64_t taskId;
+        uint64_t offset{0};
         std::vector<char> data;
-        size_t offset{0};
         [[nodiscard]] size_t GetDataSize() const { return data.size(); }
     };
     struct TaskLogNode {
