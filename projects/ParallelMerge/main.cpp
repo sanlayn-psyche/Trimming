@@ -27,7 +27,7 @@ struct TestPolicy {
     struct TaskResult {
         uint64_t taskId;
         uint64_t offset{0};
-        std::vector<char> data;
+        std::vector<int> data;
         [[nodiscard]] size_t GetDataSize() const { return data.size(); }
     };
     struct TaskLogNode {
@@ -71,7 +71,7 @@ struct TestPolicy {
                 auto& list = local_queue.front();
 
                 for (auto& task : list) {
-                    target.write(task.data.data(), task.data.size());
+                    target.write((char*)task.data.data(), task.data.size() * sizeof(int));
                 }
 
                 local_queue.pop();
@@ -101,6 +101,9 @@ struct TestPolicy {
         // 生成变长数据：随机长度 100-200 字节
         size_t len = 100 + (id % 101);
         result.data.resize(len);
+        for (int i = 0; i < len; ++i) {
+            result.data[i] = i + 1;
+        }
 
         localLog.dataSize += len;
         localLog.subNodeCnt++;

@@ -12,19 +12,41 @@
 
 #include "ParallelTaskPolicy.h"
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 #include <atomic>
 #include <cstdint>
 #include <vector>
 #include <memory>
-
 #include <array>
 #include <mutex>
 #include <optional>
+#include <functional>
 
 namespace parallel_merge {
 
 /// 每个节点的最大子任务/子节点数量
 constexpr uint64_t kNodeCapacity = 64;
+
+
+inline uint64_t CTZ64(uint64_t mask) noexcept {
+#ifdef _MSC_VER
+    unsigned long pos;
+    return _BitScanForward64(&pos, mask) ? pos : 64;
+#else
+    return __builtin_ctzll(mask);
+#endif
+}
+
+inline void IterateByMask(uint64_t mask, std::function<void(uint64_t)> func) {
+    while (mask != 0) {
+        uint64_t index = CTZ64(mask);
+        func(index);
+        mask &= (mask - 1);
+    }
+}
 
 /**
  * @brief 层次化树节点
@@ -32,10 +54,9 @@ constexpr uint64_t kNodeCapacity = 64;
 template<typename P>
 struct TrunkNode {
 
-    std::atomic<uint64_t> mask{0};
-    std::atomic<uint64_t> packedMask{0};
+    uint64_t mask{0};
+    uint64_t packedMask{0};
     uint64_t targetMask{~0ULL};
-    std::atomic<bool> packingToken { false };
 
     /// 节点所属层级
     uint32_t level{0};
@@ -67,8 +88,8 @@ struct TrunkNode {
         index = other.index;
         targetMask = other.targetMask;
         results = std::move(other.results);
-        mask = other.mask.load(std::memory_order_relaxed);
-        packedMask = other.packedMask.load(std::memory_order_relaxed);
+        mask = other.mask;
+        packedMask = other.packedMask;
         return *this;
     }
 
@@ -78,10 +99,26 @@ struct TrunkNode {
         index = other.index;
         targetMask = other.targetMask;
         results = std::move(other.results);
-        mask = other.mask.load(std::memory_order_relaxed);
-        packedMask = other.packedMask.load(std::memory_order_relaxed);
+        mask = other.mask;
+        packedMask = other.packedMask;
     }
 
+    void Update(TrunkNode& local) {
+        if (level == 0 && local.level == 0) {
+            IterateByMask(local.mask, [&](uint64_t idx) {
+                results[idx].emplace(local.results[idx].value());
+            } );
+        }
+        else if (level != local.level && local.index != index) {
+            return;
+        }
+
+        packedMask |= local.packedMask;
+        mask |= local.mask;
+
+        local.packedMask = packedMask;
+        local.mask = mask;
+    }
 
     TrunkNode CreateLocalLog() const {
         //res.packedMask.store(packedMask.load(std::memory_order_acquire), std::memory_order_relaxed);
@@ -103,7 +140,7 @@ struct TrunkNode {
         }
     }
 
-    void RealeaseLogLock()
+    void ReleaseLogLock()
     {
         logLock.clear(std::memory_order_release);
 #if defined(__cpp_lib_atomic_wait)
@@ -118,12 +155,12 @@ struct TrunkNode {
     
     /// 检查节点所有任务是否已处理完成
     [[nodiscard]] bool IsComplete() const noexcept {
-        return mask.load(std::memory_order_acquire) == targetMask;
+        return mask == targetMask;
     }
 
     /// 检查节点所有任务是否已打包落盘
     [[nodiscard]] bool IsAllPacked() const noexcept {
-        return packedMask.load(std::memory_order_acquire) == targetMask;
+        return packedMask == targetMask;
     }
     
     [[nodiscard]] bool IsLeafLevel() const noexcept {
@@ -138,20 +175,18 @@ struct TrunkNode {
      * @return 当前已完成但未打包的位掩码
      */
     uint64_t GetToBePackedMask() const noexcept {
-        const uint64_t m = mask.load(std::memory_order_acquire);
-        const uint64_t p = packedMask.load(std::memory_order_acquire);
-        return m & (~p);
+        return mask & (~packedMask);
     }
 
     /**
      * @brief 标记指定位已打包
      */
     void MarkPacked(uint64_t bitMask) noexcept {
-        packedMask.fetch_or(bitMask, std::memory_order_acq_rel);
+        packedMask |= bitMask;
     }
 
     uint64_t ReportCompletion(uint64_t bitMask) noexcept {
-        return mask.fetch_or(bitMask, std::memory_order_acq_rel) | bitMask;
+        mask |= bitMask;
     }
     
     bool ReportAndCheckComplete(uint64_t& mask) noexcept {

@@ -93,7 +93,7 @@ public:
 
     std::unique_ptr<NodeType> Extract(uint32_t level, uint64_t nodeIndex) {
 
-        printf("Thread#%x Delete Node: (%d, %d)\n", std::this_thread::get_id(), level, nodeIndex);
+        printf("Thread#%x\t Delete Node: (%d, %d)\n", std::this_thread::get_id(), level, nodeIndex);
 
         const uint64_t key = NodeType::MakeKey(level, nodeIndex);
         std::unique_lock lock(mutex_);
@@ -129,7 +129,7 @@ public:
         
         // 慢速路径：写锁创建
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        printf("Thread#%x Create Node: (%d, %d)\n", std::this_thread::get_id(), level, nodeIndex);
+        printf("Thread#%x\t Create Node: (%d, %d)\n", std::this_thread::get_id(), level, nodeIndex);
         // Double-check
         auto it = trunkMap_.find(key);
         if (it != trunkMap_.end()) {
@@ -215,8 +215,9 @@ public:
         printf("Result Check\n");
         for (auto& ite : trunkMap_) {
             auto &node = ite.second;
-            printf("\tNode: (%d, %d), target: %llx, finish: %llx, sync: %llx\n",  node->level, node->index, node->targetMask, node->mask.load(), node->packedMask.load());
+            printf("\tNode: (%d, %d), target: %llx, finish: %llx, sync: %llx\n",  node->level, node->index, node->targetMask, node->mask, node->packedMask);
         }
+
     }
 
 private:
@@ -317,7 +318,7 @@ private:
             for (size_t i = 0; i < count; ++i) {
                 uint64_t targetMask = CalculateTargetMask(level, i);
                 if (targetMask) {
-                    printf("Thread#%x Create Node: (%d, %d)\n", std::this_thread::get_id(), level, i);
+                    printf("Thread#%x\t Create Node: (%d, %d)\n", std::this_thread::get_id(), level, i);
                     auto node = std::make_unique<NodeType>(level, i, targetMask);
                     uint64_t key = node->GetKey();
                     trunkMap_.emplace(key, std::move(node));
