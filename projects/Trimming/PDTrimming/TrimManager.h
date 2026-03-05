@@ -98,14 +98,6 @@ private:
 
 
 
-	// file test
-	bool m_fileLoaded{ false };
-	vector<int> m_root;
-	vector<float> m_tree;
-	vector<float> m_curve;
-	vector<float> m_detail;
-	vector<int> m_patchIndex;
-
 	//for multi-threading combine
 	std::vector<int> nurbs_id;
 	std::vector<int>cvs_loc;
