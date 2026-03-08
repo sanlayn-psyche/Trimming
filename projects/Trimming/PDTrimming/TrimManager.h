@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <queue>
 #include "TrimShared.h"
 #include "json.hpp"
 
@@ -57,7 +58,7 @@ public:
 	std::string m_outputRoot{""};
 	int m_patchCntPerFolder{ 1000 };
 	int m_totalNumber{ 0 };
-private:
+protected:
 	struct CombineInterface
 	{
 		string m_file_appendix;
@@ -96,7 +97,13 @@ private:
 	std::ifstream m_model_data;
 	std::ofstream m_errorLog;
 
-
+	// file test
+	bool m_fileLoaded{ false };
+	vector<int> m_root;
+	vector<float> m_tree;
+	vector<float> m_curve;
+	vector<float> m_detail;
+	vector<int> m_patchIndex;
 
 	//for multi-threading combine
 	std::vector<int> nurbs_id;
@@ -123,4 +130,40 @@ private:
 	std::vector<float>m_data_array5;
 	std::vector<int>m_cvs_loc;
 	std::vector<int>m_nurbs_id;
+};
+
+
+class ParallelTrimmingPolicy : public TrimManager {
+
+public:
+    explicit ParallelTrimmingPolicy(const char* config): TrimManager(config) {}
+
+    struct TaskResult {
+        Patch *patch {nullptr};
+    };
+    struct TaskLogNode {
+        uint64_t dataSize{0};
+        uint64_t bezierCnt{0};
+    };
+	struct WorkerProperty {
+		std::ifstream fin;
+	};
+    std::queue<std::vector<TaskResult>> task_queue;
+    std::mutex task_mtx;
+    std::condition_variable cv;
+    std::atomic_bool terminate = false;
+
+    std::unique_ptr<std::thread> write_thread {nullptr};
+
+    void write();
+    void writeHelper();
+    void OnInit();
+    void OnFinalize();
+    TaskResult Process(uint64_t id, TaskLogNode& localLog, WorkerProperty& prop) const;
+    TaskLogNode UpdateLog(TaskLogNode& parent, const TaskLogNode& child);
+    void Sync(std::vector<TaskResult> &&result, TaskLogNode& log);
+	bool ShouldSync(const TaskLogNode& log);
+
+	WorkerProperty OnInitWorker();
+	void OnFinalizeWorker(WorkerProperty& woker);
 };

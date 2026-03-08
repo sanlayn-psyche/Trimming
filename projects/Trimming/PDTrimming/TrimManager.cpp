@@ -28,6 +28,7 @@
 #include <vector>
 #include <stdint.h>
 #include <sstream>
+#include <fstream>
 
 #include "ParallelManager.h"
 #include "TrimTaskPolicy.h"
@@ -797,7 +798,6 @@ bool TrimManager::act_loadMergedFile()
         return false;
     }
 
-   
     auto act_readBin = [path = this->m_jsonRoot, &json = this->m_modelInfo](const string&& identifier, vector<float>& data)
     {
         string subpath = (*json)["Trimming"][identifier];
@@ -1488,4 +1488,198 @@ string TrimManager::CombineInterface::get_name_prefix(TrimManager& tmg)
     string namePrefix;
     (*tmg.m_modelInfo)["Name"].get_to(namePrefix);
     return tmg.m_jsonRoot + namePrefix + "_";
+}
+
+void ParallelTrimmingPolicy::write()
+{
+
+    string namePrefix;
+    (*m_modelInfo)["Name"].get_to(namePrefix);
+
+    namePrefix = m_jsonRoot + namePrefix + "_";
+    std::vector<std::ofstream> fouts(8);
+    fouts[0].open(namePrefix + "roots.bin", std::ios::binary);
+    fouts[1].open(namePrefix + "tree.bin", std::ios::binary);
+    fouts[2].open(namePrefix + "curveset.bin", std::ios::binary);
+    fouts[3].open(namePrefix + "curvedetail.bin", std::ios::binary);
+
+    vector<int> offsets(4, 0);
+    if (m_patch_prop.m_eval_ptr->m_type == EvalType::BinEval)
+    {
+        offsets[3] = sizeof(binomial_comb) / 4;
+        fouts[3].write((char*)binomial_comb, sizeof(binomial_comb));
+    }
+
+    fouts[4].open(namePrefix + "ctrl.bin", std::ios::binary);
+    fouts[5].open(namePrefix + "geom.bin", std::ios::binary);
+    fouts[6].open(namePrefix + "trim.bin", std::ios::binary);
+    fouts[7].open(namePrefix + "flag.bin", std::ios::binary);
+
+    std::queue<std::vector<TaskResult>> local_queue;
+
+    while (!terminate.load(std::memory_order_acquire)) {
+
+        if (local_queue.empty()) {
+            std::unique_lock<std::mutex> lock(task_mtx);
+            cv.wait(lock, [this]{ return !task_queue.empty() || terminate.load(std::memory_order_acquire);});
+            if (terminate.load(std::memory_order_acquire) && task_queue.empty()) break;
+            local_queue.swap(task_queue);
+        }
+
+        while (!local_queue.empty()) {
+            auto& list = local_queue.front();
+
+            for (auto& task : list) {
+                target.write((char*)task.data.data(), task.data.size() * sizeof(int));
+            }
+
+            local_queue.pop();
+        }
+    }
+
+    for (auto& fo : fouts)
+    {
+        fo.close();
+    }
+}
+
+void ParallelTrimmingPolicy::writeHelper() {
+
+    if (!error_flag)
+    {
+        std::string root{ tm_ptr->m_outputRoot + std::to_string(patch_to_process / tm_ptr->m_patchCntPerFolder)
+       + "/patch_" + std::to_string(patch_to_process) };
+        result.patch->act_output(static_cast<GenerateType>(tm_ptr->m_generateMode), root);
+        act_atomicMax(tm_ptr->m_maxCurveOrder, result.patch->get_maxOrderOfCurve());
+        tm_ptr->m_bezierNum.fetch_add(result.patch->get_bezier_cnt());
+        int bz_num = tm_ptr->m_bezierNum;
+        (*tm_ptr->m_modelInfo)["Geometry"]["BezierNum"] = bz_num;
+    }
+
+}
+
+void ParallelTrimmingPolicy::OnInit() {
+    write_thread = std::make_unique<std::thread>([this](){write();});
+}
+
+
+void ParallelTrimmingPolicy::OnFinalize() {
+    terminate.store(true, std::memory_order_release);
+    cv.notify_one();
+    write_thread->join();
+
+    (*m_modelInfo)["Name"].get_to(namePrefix);
+
+    (*m_modelInfo)["Trimming"]["Roots_Size"] = static_cast<int>(offsets[0] * 4);
+    (*m_modelInfo)["Trimming"]["Tree_Size"] = static_cast<int>(offsets[1] * 4);
+    (*m_modelInfo)["Trimming"]["CurveSet_Size"] = static_cast<int>(offsets[2] * 4);
+    (*m_modelInfo)["Trimming"]["CurveDetail_Size"] = static_cast<int>(offsets[3] * 4);
+
+    (*m_modelInfo)["Trimming"]["BezierCurve_DataSize"] = bezier_curve_data;
+    (*m_modelInfo)["Trimming"]["BezierCurve_Cnt"] = bezier_curve_cnt;
+
+    (*m_modelInfo)["Trimming"]["Roots"] = namePrefix + "_roots.bin";
+    (*m_modelInfo)["Trimming"]["Tree"] = namePrefix + "_tree.bin";
+    (*m_modelInfo)["Trimming"]["CurveSet"] = namePrefix + "_curveset.bin";
+    (*m_modelInfo)["Trimming"]["CurveDetail"] = namePrefix + "_curvedetail.bin";
+    (*m_modelInfo)["Trimming"]["Domain"] = namePrefix + "_domain.bin";
+
+    (*m_modelInfo)["Geometry"]["Trim"] = namePrefix + "_trim.bin";
+    (*m_modelInfo)["Geometry"]["Ctrl"] = namePrefix + "_ctrl.bin";
+    (*m_modelInfo)["Geometry"]["Geom"] = namePrefix + "_geom.bin";
+    (*m_modelInfo)["Geometry"]["Samp"] = namePrefix + "_samp.bin";
+    (*m_modelInfo)["Geometry"]["Flag"] = namePrefix + "_flag.bin";
+    (*m_modelInfo)["Geometry"]["BezierNum"] = bezier_cnt_total;
+    (*m_modelInfo)["Geometry"]["TrimmedBezierNum"] = trimmed_bezier_cnt;
+
+    (*m_modelInfo)["Geometry"]["BezierSurf_DataSize"] = bezier_surf_data;
+    (*m_modelInfo)["Geometry"]["BezierSurf_Cnt"] = bezier_surf_cnt;
+
+    (*m_modelInfo)["MergedPatchNum"] = tmg.m_totalNumber - mis_patch_cnt;
+
+    std::cout << std::endl;
+    std::cout << "File merging finished!" << std::endl << std::endl;
+    std::cout << "#NURBS patch: " << tmg.m_totalNumber << std::endl;
+    std::cout << "#NURBS patch with wrong trimming: " << mis_patch_cnt << std::endl << std::endl;
+
+    (*m_modelInfo)["Trimming"]["MergeDone"] = 1;
+
+    this->act_updataModleInfo();
+}
+
+ParallelTrimmingPolicy::TaskResult ParallelTrimmingPolicy::Process(uint64_t id, TaskLogNode& localLog, WorkerProperty& prop) const {
+
+    TaskResult result;
+
+
+    PatchProperty pr = PatchProperty(this->m_patch_prop);
+
+    pr.m_id = id;
+    result.patch = new Patch(pr);
+
+    bool error_flag = false;
+    try
+    {
+        result.patch->init_load(fin, this->m_offsetTable[id]);
+        result.patch->init_generate();
+        result.patch->act_generate_data();
+    }
+    catch (const lf_exception& error)
+    {
+        error_flag = true;
+        error.set_patchid(id);
+        auto info = error.what();
+        __atomic_print(info);
+#ifdef _DEBUG
+        error.act_output();
+#endif // _DEBUG
+    }
+    catch (std::runtime_error exp)
+    {
+        error_flag = true;
+        __atomic_print(exp.what());
+    }
+    catch (...)
+    {
+        error_flag = true;
+        __atomic_print("Unknown exception caught in worker thread");
+    }
+
+    return result;
+}
+
+ParallelTrimmingPolicy::TaskLogNode ParallelTrimmingPolicy::UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
+    parent.dataSize += child.dataSize;
+    parent.bezierCnt += child.bezierCnt;
+    return parent;
+}
+
+void ParallelTrimmingPolicy::Sync(std::vector<TaskResult> &&result, TaskLogNode& log) {
+    {
+        std::lock_guard<std::mutex> lock(task_mtx);
+        task_queue.push(std::move(result));
+    }
+    cv.notify_one();
+}
+
+bool ParallelTrimmingPolicy::ShouldSync(const TaskLogNode& log) {
+    return log.bezierCnt >= 1024 || log.dataSize >= 1024 * 1024 * 512;
+}
+
+ParallelTrimmingPolicy::WorkerProperty ParallelTrimmingPolicy::OnInitWorker() {
+
+    WorkerProperty prop;
+    std::ifstream fin;
+    if (this->m_patch_prop.m_load_mode == 0)
+    {
+        prop.fin.open(this->m_inputRoot);
+    }
+    else
+    {
+        prop.fin.open(this->m_inputRoot, std::ios::binary);
+    }
+    return prop;
+}
+
+void ParallelTrimmingPolicy::OnFinalizeWorker(WorkerProperty &woker) {
 }

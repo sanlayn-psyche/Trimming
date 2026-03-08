@@ -17,174 +17,6 @@
 #include <cassert>
 #include <condition_variable>
 
-// 临时
-#include "../Trimming/PDTrimming/TrimManager.h"
-#include "../Trimming/PDTrimming/Patch.h"
-
-struct ParallelTrimmingPolicy : public TrimManager {
-
-    ParallelTrimmingPolicy(const char* config): TrimManager(config) {}
-
-    struct TaskResult {
-        std::unique_ptr<Patch> patch;
-    };
-    struct TaskLogNode {
-        uint64_t dataSize{0};
-        uint64_t bezierCnt{0};
-    };
-    std::queue<std::vector<TaskResult>> task_queue;
-    std::mutex task_mtx;
-    std::condition_variable cv;
-    std::atomic_bool terminate = false;
-
-    std::unique_ptr<std::thread> write_thread {nullptr};
-
-    void write() {
-
-        string namePrefix;
-        (*m_modelInfo)["Name"].get_to(namePrefix);
-
-        namePrefix = m_jsonRoot + namePrefix + "_";
-        std::vector<std::ofstream> fouts(8);
-        fouts[0].open(namePrefix + "roots.bin", std::ios::binary);
-        fouts[1].open(namePrefix + "tree.bin", std::ios::binary);
-        fouts[2].open(namePrefix + "curveset.bin", std::ios::binary);
-        fouts[3].open(namePrefix + "curvedetail.bin", std::ios::binary);
-
-        vector<int> offsets(4, 0);
-        if (m_patch_prop.m_eval_ptr->m_type == EvalType::BinEval)
-        {
-            offsets[3] = sizeof(binomial_comb) / 4;
-            fouts[3].write((char*)binomial_comb, sizeof(binomial_comb));
-        }
-
-        fouts[4].open(namePrefix + "ctrl.bin", std::ios::binary);
-        fouts[5].open(namePrefix + "geom.bin", std::ios::binary);
-        fouts[6].open(namePrefix + "trim.bin", std::ios::binary);
-        fouts[7].open(namePrefix + "flag.bin", std::ios::binary);
-
-        std::queue<std::vector<TaskResult>> local_queue;
-
-        while (!terminate.load(std::memory_order_acquire)) {
-
-            if (local_queue.empty()) {
-                std::unique_lock<std::mutex> lock(task_mtx);
-                cv.wait(lock, [this]{ return !task_queue.empty() || terminate.load(std::memory_order_acquire);});
-                if (terminate.load(std::memory_order_acquire) && task_queue.empty()) break;
-                local_queue.swap(task_queue);
-            }
-
-            while (!local_queue.empty()) {
-                auto& list = local_queue.front();
-
-                for (auto& task : list) {
-                    target.write((char*)task.data.data(), task.data.size() * sizeof(int));
-                }
-
-                local_queue.pop();
-            }
-        }
-
-        for (auto& fin : fouts)
-        {
-            fin.close();
-        }
-    }
-
-    void WriteHelper() {
-
-    }
-
-    void OnInit() {
-        write_thread = std::make_unique<std::thread>([this](){write();});
-    }
-
-    void OnFinalize() {
-        terminate.store(true, std::memory_order_release);
-        cv.notify_one();
-        write_thread->join();
-
-        for (auto& fout : fouts)
-        {
-            fout.close();
-        }
-
-        (*m_modelInfo)["Name"].get_to(namePrefix);
-
-        (*m_modelInfo)["Trimming"]["Roots_Size"] = static_cast<int>(offsets[0] * 4);
-        (*m_modelInfo)["Trimming"]["Tree_Size"] = static_cast<int>(offsets[1] * 4);
-        (*m_modelInfo)["Trimming"]["CurveSet_Size"] = static_cast<int>(offsets[2] * 4);
-        (*m_modelInfo)["Trimming"]["CurveDetail_Size"] = static_cast<int>(offsets[3] * 4);
-
-        (*m_modelInfo)["Trimming"]["BezierCurve_DataSize"] = bezier_curve_data;
-        (*m_modelInfo)["Trimming"]["BezierCurve_Cnt"] = bezier_curve_cnt;
-
-        (*m_modelInfo)["Trimming"]["Roots"] = namePrefix + "_roots.bin";
-        (*m_modelInfo)["Trimming"]["Tree"] = namePrefix + "_tree.bin";
-        (*m_modelInfo)["Trimming"]["CurveSet"] = namePrefix + "_curveset.bin";
-        (*m_modelInfo)["Trimming"]["CurveDetail"] = namePrefix + "_curvedetail.bin";
-        (*m_modelInfo)["Trimming"]["Domain"] = namePrefix + "_domain.bin";
-
-        (*m_modelInfo)["Geometry"]["Trim"] = namePrefix + "_trim.bin";
-        (*m_modelInfo)["Geometry"]["Ctrl"] = namePrefix + "_ctrl.bin";
-        (*m_modelInfo)["Geometry"]["Geom"] = namePrefix + "_geom.bin";
-        (*m_modelInfo)["Geometry"]["Samp"] = namePrefix + "_samp.bin";
-        (*m_modelInfo)["Geometry"]["Flag"] = namePrefix + "_flag.bin";
-        (*m_modelInfo)["Geometry"]["BezierNum"] = bezier_cnt_total;
-        (*m_modelInfo)["Geometry"]["TrimmedBezierNum"] = trimmed_bezier_cnt;
-
-        (*m_modelInfo)["Geometry"]["BezierSurf_DataSize"] = bezier_surf_data;
-        (*m_modelInfo)["Geometry"]["BezierSurf_Cnt"] = bezier_surf_cnt;
-
-        (*m_modelInfo)["MergedPatchNum"] = tmg.m_totalNumber - mis_patch_cnt;
-
-        std::cout << std::endl;
-        std::cout << "File merging finished!" << std::endl << std::endl;
-        std::cout << "#NURBS patch: " << tmg.m_totalNumber << std::endl;
-        std::cout << "#NURBS patch with wrong trimming: " << mis_patch_cnt << std::endl << std::endl;
-
-        (*m_modelInfo)["Trimming"]["MergeDone"] = 1;
-
-        this->act_updataModleInfo();
-    }
-
-    TaskResult Process(uint64_t id, TaskLogNode& localLog) const {
-        TaskResult result;
-        result.taskId = id;
-
-        // 生成变长数据：随机长度 100-200 字节
-        size_t len = 100 + (id % 101);
-        result.data.resize(len);
-        for (int i = 0; i < len; ++i) {
-            result.data[i] = i + 1;
-        }
-
-        localLog.dataSize += len;
-        localLog.subNodeCnt++;
-        return result;
-    }
-
-    TaskLogNode UpdateLog(TaskLogNode& parent, const TaskLogNode& child) {
-        parent.dataSize += child.dataSize;
-        parent.bezierCnt += child.bezierCnt;
-        return parent;
-    }
-
-    void Sync(std::vector<TaskResult> &&result, TaskLogNode& log) {
-        {
-            std::lock_guard<std::mutex> lock(task_mtx);
-            task_queue.push(std::move(result));
-        }
-        cv.notify_one();
-    }
-
-    static bool ShouldSync(const TaskLogNode& log) {
-        return log.bezierCnt >= 1024 || log.dataSize >= 1024 * 1024 * 512;
-    }
-
-};
-
-
 namespace parallel_merge {
 
 /**
@@ -202,6 +34,7 @@ struct TestPolicy {
         uint64_t dataSize{0};
         uint64_t subNodeCnt{0};
     };
+    struct WorkerProperty {};
 
     std::string baseDir = "test_output";
     std::string fileDir;
@@ -245,7 +78,6 @@ struct TestPolicy {
                 local_queue.pop();
             }
         }
-
         target.close();
     }
 
@@ -255,6 +87,10 @@ struct TestPolicy {
         std::cout << "[TestPolicy] Storage initialized at " << baseDir << "\n";
     }
 
+    WorkerProperty OnInitWorker() {
+        return {};
+    }
+
     void OnFinalize() {
         terminate.store(true, std::memory_order_release);
         cv.notify_one();
@@ -262,7 +98,11 @@ struct TestPolicy {
         std::cout << "[TestPolicy] Finalized and storage closed.\n";
     }
 
-    TaskResult Process(uint64_t id, TaskLogNode& localLog) const {
+    void OnFinalizeWorker(WorkerProperty& woker) {
+
+    }
+
+    TaskResult Process(uint64_t id, TaskLogNode& localLog, WorkerProperty& woker) const {
         TaskResult result;
         result.taskId = id;
         

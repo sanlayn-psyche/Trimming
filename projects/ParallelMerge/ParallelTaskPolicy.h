@@ -33,6 +33,7 @@ concept ParallelTaskPolicy = requires(
     uint64_t id,
     typename P::TaskResult result,
     typename P::TaskLogNode nodeLog,
+    typename P::WorkerProperty worker,
     std::vector<typename P::TaskResult> result_list,
     void* slot,
     std::ostream& os
@@ -43,8 +44,10 @@ concept ParallelTaskPolicy = requires(
     typename P::TaskLogNode;
 
     { p.OnInit() } -> std::same_as<void>;
+    { p.OnInitWorker() } -> std::same_as<typename P::WorkerProperty>;
+    { p.OnFinalizeWorker(worker) } -> std::same_as<void>;
     { p.OnFinalize() } -> std::same_as<void>;
-    { p.Process(id, nodeLog) } -> std::same_as<typename P::TaskResult>;
+    { p.Process(id, nodeLog, worker) } -> std::same_as<typename P::TaskResult>;
     { p.Sync(std::move(result_list), nodeLog) } -> std::same_as<void>;
     { p.ShouldSync(nodeLog) } -> std::convertible_to<bool>;
     { p.UpdateLog(nodeLog, nodeLog) } -> std::same_as<typename P::TaskLogNode>;
